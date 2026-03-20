@@ -1,0 +1,479 @@
+Table tenants {
+  id bigint [pk, increment]
+  tenant_code text [not null, unique]
+  tenant_name text [not null]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table import_batches {
+  id bigint [pk, increment]
+  batch_uuid uuid [not null, unique]
+  tenant_id bigint [not null, ref: > tenants.id]
+  source_file_name text [not null]
+  source_file_type text
+  source_sheet_name text
+  file_checksum text
+  file_object_key text
+  total_rows int [not null, default: 0]
+  total_columns int [not null, default: 0]
+  valid_rows int [not null, default: 0]
+  rejected_rows int [not null, default: 0]
+  import_status text [not null, default: 'UPLOADED']
+  notes text
+  imported_at timestamptz [not null, default: `now()`]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table raw_records {
+  id bigint [pk, increment]
+  import_batch_id bigint [not null, ref: > import_batches.id]
+  source_row_number int [not null]
+  raw_row_json jsonb [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (import_batch_id, source_row_number) [unique]
+  }
+}
+
+Table distributors {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  distributor_code text [not null]
+  distributor_name text [not null]
+  zone text
+  region text
+  area text
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, distributor_code) [unique]
+  }
+}
+
+Table beats {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  beat_code text [not null]
+  beat_name text [not null]
+  distributor_id bigint [ref: > distributors.id]
+  zone text
+  region text
+  area text
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, beat_code) [unique]
+  }
+}
+
+Table salesmen {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  salesman_code text [not null]
+  external_salesman_id text
+  employee_code text
+  salesman_name text [not null]
+  phone_number text
+  distributor_id bigint [ref: > distributors.id]
+  zone text
+  region text
+  area text
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, salesman_code) [unique]
+  }
+}
+
+Table outlets {
+  id bigint [pk, increment]
+  external_outlet_code text
+  outlet_name text [not null]
+  mobile_number text
+  gst_number text
+  address_line1 text
+  address_line2 text
+  pincode text
+  latitude numeric(10,7)
+  longitude numeric(10,7)
+  zone text
+  region text
+  area text
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table beat_outlets {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  beat_id bigint [not null, ref: > beats.id]
+  outlet_id bigint [not null, ref: > outlets.id]
+  active boolean [not null, default: true]
+  assigned_at timestamptz [not null, default: `now()`]
+  removed_at timestamptz
+  assigned_by text
+  removed_by text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, beat_id, outlet_id) [unique]
+  }
+
+  Note: 'Add partial unique index in Postgres: unique (tenant_id, outlet_id) where active = true'
+}
+
+Table tenant_outlets {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  outlet_id bigint [not null, ref: > outlets.id]
+  tenant_outlet_code text [not null]
+  salesman_id bigint [ref: > salesmen.id]
+  distributor_id bigint [ref: > distributors.id]
+  servicing_status text
+  active boolean [not null, default: true]
+  first_order_date date
+  last_order_date date
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, outlet_id) [unique]
+    (tenant_id, tenant_outlet_code) [unique]
+  }
+}
+
+Table brands {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  brand_code text
+  brand_name text [not null]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, brand_name) [unique]
+  }
+}
+
+Table skus {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  sku_code text [not null]
+  name text [not null]
+  brand_id bigint [ref: > brands.id]
+  hsn_code text
+  mrp numeric(12,2)
+  discount_amount numeric(12,2)
+  discount_percent numeric(7,2)
+  rate numeric(12,2)
+  sgst_percent numeric(7,2)
+  sgst_amount numeric(12,2)
+  cgst_percent numeric(7,2)
+  cgst_amount numeric(12,2)
+  amount numeric(12,2)
+  weight numeric(12,3)
+  length_cm numeric(10,2)
+  width_cm numeric(10,2)
+  height_cm numeric(10,2)
+  igst_percent numeric(7,2)
+  igst_amount numeric(12,2)
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, sku_code) [unique]
+  }
+}
+
+Table sales_orders {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  import_batch_id bigint [ref: > import_batches.id]
+  external_order_id text
+  external_invoice_no text
+  external_awb_no text
+  order_punched_at timestamptz
+  order_sale_date date
+  outlet_id bigint [not null, ref: > outlets.id]
+  tenant_outlet_id bigint [ref: > tenant_outlets.id]
+  beat_id bigint [ref: > beats.id]
+  salesman_id bigint [ref: > salesmen.id]
+  distributor_id bigint [ref: > distributors.id]
+  gross_amount numeric(14,2)
+  discount_amount numeric(14,2)
+  tax_amount numeric(14,2)
+  net_amount numeric(14,2)
+  collections_amount numeric(14,2)
+  outstanding_amount numeric(14,2)
+  decided_margin_amount numeric(14,2)
+  remarks text
+  first_source_record_id bigint [ref: > raw_records.id]
+  latest_source_record_id bigint [ref: > raw_records.id]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Use partial unique indexes in Postgres for tenant+external_invoice_no and tenant+external_order_id when non-null'
+}
+
+Table sales_order_items {
+  id bigint [pk, increment]
+  sales_order_id bigint [not null, ref: > sales_orders.id]
+  sku_id bigint [not null, ref: > skus.id]
+  external_line_id text
+  ordered_quantity numeric(12,3) [not null]
+  rate numeric(12,2)
+  discount_amount numeric(12,2)
+  discount_percent numeric(7,2)
+  sgst_percent numeric(7,2)
+  sgst_amount numeric(12,2)
+  cgst_percent numeric(7,2)
+  cgst_amount numeric(12,2)
+  igst_percent numeric(7,2)
+  igst_amount numeric(12,2)
+  tax_amount numeric(12,2)
+  amount numeric(12,2)
+  first_source_record_id bigint [ref: > raw_records.id]
+  latest_source_record_id bigint [ref: > raw_records.id]
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'Use unique index in Postgres on (sales_order_id, external_line_id) where external_line_id is not null'
+}
+
+Table order_payments {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  sales_order_id bigint [not null, ref: > sales_orders.id]
+  payment_date date
+  payment_mode text
+  amount numeric(14,2)
+  external_ref text
+  source_record_id bigint [ref: > raw_records.id]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table canonical_record_sources {
+  id bigint [pk, increment]
+  entity_name text [not null]
+  entity_pk bigint [not null]
+  raw_record_id bigint [not null, ref: > raw_records.id]
+  role text
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table entity_metric_snapshots {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  entity_type text [not null]
+  entity_id text [not null]
+  entity_name text
+  metric_key text [not null]
+  metric_label text
+  metric_unit text
+  time_granularity text [not null]
+  snapshot_date date [not null]
+  period_start_date date
+  period_end_date date
+  zone text
+  region text
+  area text
+  metric_value numeric(18,4) [not null]
+  previous_value numeric(18,4)
+  numerator numeric(18,4)
+  denominator numeric(18,4)
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table signal_definitions {
+  id bigint [pk, increment]
+  entity_type text [not null]
+  signal_key text [not null]
+  metric_key text [not null]
+  comparison_operator text [not null]
+  value_type text [not null]
+  unit_label text
+  window_type text [not null, default: 'MTD']
+  default_severity text [not null, default: 'warning']
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (entity_type, signal_key) [unique]
+  }
+}
+
+Table tenant_signal_thresholds {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  signal_definition_id bigint [not null, ref: > signal_definitions.id]
+  zone text [not null, default: 'NATIONAL']
+  threshold_value numeric(18,4) [not null]
+  is_enabled boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, signal_definition_id, zone) [unique]
+  }
+
+  Note: 'zone is uppercase; NATIONAL is the default fallback'
+}
+
+Table entity_signals {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  signal_definition_id bigint [not null, ref: > signal_definitions.id]
+  entity_type text [not null]
+  entity_id text [not null]
+  entity_name text
+  severity text [not null]
+  signal_key text [not null]
+  headline text [not null]
+  description text
+  metric_key text
+  observed_value numeric(18,4)
+  threshold_value numeric(18,4)
+  comparison_operator text
+  breach_amount numeric(18,4)
+  zone text
+  region text
+  area text
+  window_start_date date
+  window_end_date date
+  detected_at timestamptz [not null, default: `now()`]
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table compare_presets {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  preset_name text [not null]
+  compare_dimension text [not null]
+  selected_metrics jsonb [not null]
+  selected_entities jsonb [not null]
+  filters jsonb
+  created_by text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table compare_runs {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  compare_dimension text [not null]
+  period_label text
+  snapshot_date date
+  filters jsonb
+  selected_metrics jsonb [not null]
+  selected_entities jsonb [not null]
+  run_status text [not null, default: 'COMPLETED']
+  created_by text
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table compare_results {
+  id bigint [pk, increment]
+  compare_run_id bigint [not null, ref: > compare_runs.id]
+  tenant_id bigint [not null, ref: > tenants.id]
+  compare_dimension text [not null]
+  entity_id text [not null]
+  entity_name text [not null]
+  zone text
+  region text
+  area text
+  metric_key text [not null]
+  metric_value numeric(18,4)
+  percentile_rank numeric(7,2)
+  index_to_average numeric(18,4)
+  gap_to_top numeric(18,4)
+  gap_to_average numeric(18,4)
+  composite_score numeric(18,4)
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table people {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  person_code text
+  full_name text [not null]
+  role_code text
+  role_name text
+  zone text
+  region text
+  area text
+  manager_person_id bigint [ref: > people.id]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, person_code) [unique]
+  }
+}
+
+Table target_definitions {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  target_key text [not null]
+  target_name text [not null]
+  metric_key text [not null]
+  metric_unit text
+  comparison_operator text [not null]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (tenant_id, target_key) [unique]
+  }
+}
+
+Table target_assignments {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  person_id bigint [not null, ref: > people.id]
+  target_definition_id bigint [not null, ref: > target_definitions.id]
+  assignment_name text
+  period_granularity text [not null]
+  period_start_date date [not null]
+  period_end_date date [not null]
+  target_value numeric(18,4) [not null]
+  stretch_value numeric(18,4)
+  weightage numeric(8,2)
+  status text [not null, default: 'active']
+  created_by text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table target_progress_snapshots {
+  id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > tenants.id]
+  target_assignment_id bigint [not null, ref: > target_assignments.id]
+  person_id bigint [not null, ref: > people.id]
+  snapshot_date date [not null]
+  actual_value numeric(18,4) [not null]
+  target_value numeric(18,4) [not null]
+  progress_pct numeric(8,2)
+  status_label text
+  variance_value numeric(18,4)
+  variance_pct numeric(8,2)
+  metadata jsonb
+  created_at timestamptz [not null, default: `now()`]
+}

@@ -1,0 +1,144 @@
+import { FastifyReply, FastifyRequest } from 'fastify';
+import cookie from '@fastify/cookie';
+import { env } from '../config/env';
+import { COOKIE_NAME_BY_APP_TYPE, FALLBACK_COOKIE_NAMES } from '../config/constants';
+import { verifyOauthCode, verifySessionToken } from '../auth/umsAuthClient';
+import { IAuthUser } from '../types';
+
+const cookieOptions = {
+  httpOnly: true,
+  signed: true,
+  secure: env.NODE_ENV === 'production',
+  sameSite: env.NODE_ENV === 'production' ? ('none' as const) : ('lax' as const),
+  path: '/'
+};
+
+function getCookieName(request: FastifyRequest): string {
+  const appType = String(request.headers.apptype || request.headers.appType || '');
+  return COOKIE_NAME_BY_APP_TYPE[appType] || 'AUTH_TOKEN_COOKIE_SUPE';
+}
+
+function getSessionTokenFromRequest(request: FastifyRequest): string | null {
+  const cookieName = getCookieName(request);
+  const signedCookies = request.cookies || {};
+
+  if (signedCookies[cookieName]) {
+    const unsigned = request.unsignCookie(String(signedCookies[cookieName]));
+    return unsigned.valid ? unsigned.value : null;
+  }
+
+  for (const name of FALLBACK_COOKIE_NAMES) {
+    if (signedCookies[name]) {
+      const unsigned = request.unsignCookie(String(signedCookies[name]));
+      return unsigned.valid ? unsigned.value : null;
+    }
+  }
+
+  const headerToken = request.headers['x-session-token'];
+  if (typeof headerToken === 'string' && headerToken.trim()) {
+    return headerToken.trim();
+  }
+
+  return null;
+}
+
+function getBypassUser(): IAuthUser {
+  return {
+    id: env.AUTH_BYPASS_USER_ID,
+    userType: env.AUTH_BYPASS_USER_TYPE,
+    userRole: env.AUTH_BYPASS_USER_ROLE,
+    tenantId: env.DEV_TENANT_ID
+  };
+}
+
+export async function registerAuth(app: any): Promise<void> {
+  await app.register(cookie, { secret: env.COOKIE_SECRET, parseOptions: {} });
+
+  app.decorate(
+    'authenticate',
+    async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      if (env.AUTH_BYPASS) {
+        request.user = getBypassUser();
+        return;
+      }
+
+      const token = getSessionTokenFromRequest(request);
+      if (!token) {
+        reply.status(403).send({
+          responseCode: '000028',
+          responseMessage: 'No Token Present or Auth code , Logout user',
+          status: 'Fail'
+        });
+        return;
+      }
+
+      const verified = await verifySessionToken(token);
+      if (!verified) {
+        reply.status(403).send({
+          responseCode: '000028',
+          responseMessage: 'Token is invalid , Logout user',
+          status: 'Fail'
+        });
+        return;
+      }
+
+      request.user = verified;
+    }
+  );
+
+  const cookieHandler = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (env.AUTH_BYPASS) {
+      request.user = getBypassUser();
+      reply.status(200).send({ success: true, message: 'cookie-set-bypass' });
+      return;
+    }
+
+    const oauthCodeRaw = (request.query as Record<string, unknown> | undefined)?.oauthCode;
+    const oauthCode = typeof oauthCodeRaw === 'string' ? oauthCodeRaw : '';
+    if (oauthCode) {
+      const oauthResult = await verifyOauthCode(oauthCode);
+      if (!oauthResult) {
+        reply.status(403).send({ responseCode: '000028', responseMessage: 'oauth not valid , Logout user', status: 'Fail' });
+        return;
+      }
+
+      const cookieName = getCookieName(request);
+      reply.setCookie(cookieName, oauthResult.token, cookieOptions);
+      request.user = oauthResult.user;
+      reply.status(200).send({ success: true, message: 'cookie-set' });
+      return;
+    }
+
+    const token = getSessionTokenFromRequest(request);
+    if (!token) {
+      reply.status(403).send({ responseCode: '000028', responseMessage: 'No Token Present or Auth code , Logout user', status: 'Fail' });
+      return;
+    }
+
+    const verified = await verifySessionToken(token);
+    if (!verified) {
+      reply.status(403).send({ responseCode: '000028', responseMessage: 'Token is invalid , Logout user', status: 'Fail' });
+      return;
+    }
+
+    request.user = verified;
+    reply.status(200).send({ success: true, message: 'cookie-valid' });
+  };
+
+  const clearCookieHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
+    for (const cookieName of FALLBACK_COOKIE_NAMES) {
+      reply.clearCookie(cookieName, cookieOptions);
+    }
+    reply.status(200).send({ success: true, message: 'Deleted' });
+  };
+
+  app.get('/cookie', cookieHandler);
+  app.get('/oms/cookie', cookieHandler);
+  app.get('/api/v1/cookie', cookieHandler);
+  app.get('/api/v1/oms/cookie', cookieHandler);
+
+  app.delete('/cookie', clearCookieHandler);
+  app.delete('/oms/cookie', clearCookieHandler);
+  app.delete('/api/v1/cookie', clearCookieHandler);
+  app.delete('/api/v1/oms/cookie', clearCookieHandler);
+}

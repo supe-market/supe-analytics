@@ -1,0 +1,23 @@
+export enum AppType {
+  APP_SELLER = 'AppSeller',
+  APP_WMS = 'AppWms',
+  APP_LIGHTNING = 'AppLightning',
+  APP_ADMIN = 'AppAdmin',
+  APP_SUPE = 'AppSupe'
+}
+
+export const COOKIE_NAME_BY_APP_TYPE: Record<string, string> = {
+  [AppType.APP_SELLER]: 'AUTH_TOKEN_COOKIE',
+  [AppType.APP_WMS]: 'AUTH_TOKEN_COOKIE_WMS',
+  [AppType.APP_LIGHTNING]: 'AUTH_TOKEN_COOKIE_LIGHTNING',
+  [AppType.APP_ADMIN]: 'AUTH_TOKEN_COOKIE_ADMIN',
+  [AppType.APP_SUPE]: 'AUTH_TOKEN_COOKIE_SUPE'
+};
+
+export const FALLBACK_COOKIE_NAMES = [
+  'AUTH_TOKEN_COOKIE_SUPE',
+  'AUTH_TOKEN_COOKIE_ADMIN',
+  'AUTH_TOKEN_COOKIE',
+  'AUTH_TOKEN_COOKIE_WMS',
+  'AUTH_TOKEN_COOKIE_LIGHTNING'
+];
