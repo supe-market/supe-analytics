@@ -2,8 +2,9 @@ import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { env } from '../config/env';
 import { InitSupeSchema1710000000000 } from './migrations/1710000000000-InitSupeSchema';
+import { ActionWorkflow1710000001000 } from './migrations/1710000001000-ActionWorkflow';
 
-export const AppDataSource = new DataSource({
+const AppDataSource = new DataSource({
   type: 'postgres',
   host: env.DB_HOST,
   port: env.DB_PORT,
@@ -12,7 +13,7 @@ export const AppDataSource = new DataSource({
   database: env.DB_NAME,
   ssl: env.DB_SSL ? { rejectUnauthorized: false } : false,
   entities: [],
-  migrations: [InitSupeSchema1710000000000],
+  migrations: [InitSupeSchema1710000000000, ActionWorkflow1710000001000],
   synchronize: false,
   logging: false
 });

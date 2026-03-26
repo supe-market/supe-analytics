@@ -1,12 +1,12 @@
 import { createHash } from 'crypto';
 import { DataSource, QueryRunner } from 'typeorm';
-import { parse as parseCsv } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { env } from '../../config/env';
 import { IAuthUser } from '../../types';
 import {
   daysBetweenDates,
+  formatDateParts,
   formatISTDate,
   getCurrentISTDate,
   getCurrentISTMonthRange,
@@ -22,8 +22,6 @@ type ImportableFile = {
   mimetype: string;
   toBuffer: () => Promise<Buffer>;
 };
-
-type JsonRecord = Record<string, unknown>;
 
 const SIGNAL_DEFINITIONS_SEED = [
   ['salesman', 'coverage', 'coverage_pct', 'LT', 'percent', '%', 'MTD', 'warning'],
@@ -163,6 +161,32 @@ type ImportRowError = {
   message: string;
 };
 
+type ImportErrorPhase = 'prevalidation' | 'validation' | 'processing' | 'post_import';
+
+type ImportBatchSummary = {
+  id: number;
+  tenantId: number;
+  sourceFileName: string;
+  sourceFileType: string | null;
+  sourceSheetName: string | null;
+  fileChecksum: string | null;
+  fileObjectKey: string | null;
+  totalRows: number;
+  totalColumns: number;
+  validRows: number;
+  rejectedRows: number;
+  errorCount: number;
+  importStatus: string;
+  notes: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  processedBy: string | null;
+  importedAt: string;
+  createdAt: string;
+};
+
+const IMPORT_DETAIL_ERROR_LIMIT = 100;
+
 class ImportValidationError extends Error {
   statusCode: number;
   details: ImportRowError[];
@@ -198,14 +222,6 @@ function toDateOnly(input: unknown): string | null {
   return formatISTDate(date);
 }
 
-function normalizeHeader(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
-
 function normalizePhone(value: unknown): string {
   if (!value) {
     return '';
@@ -222,16 +238,6 @@ function toNumber(value: unknown): number | null {
     return null;
   }
   return parsed;
-}
-
-function firstValue(row: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = row[key];
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      return String(value).trim();
-    }
-  }
-  return '';
 }
 
 function buildRange(): { start: string; end: string } {
@@ -305,9 +311,6 @@ export class SupeV1Service {
   private resolveTenantCode(user?: IAuthUser): string {
     if (user?.tenantId) {
       return String(user.tenantId);
-    }
-    if (env.AUTH_BYPASS) {
-      return String(env.DEV_TENANT_ID);
     }
     throw new Error('Authenticated supe user is missing supeTenantId');
   }
@@ -391,49 +394,6 @@ export class SupeV1Service {
     }
   }
 
-  private inferSourceCode(filename: string): 'CSV_UPLOAD' | 'XLSX_UPLOAD' {
-    const lower = filename.toLowerCase();
-    if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-      return 'XLSX_UPLOAD';
-    }
-    return 'CSV_UPLOAD';
-  }
-
-  private parseSheet(
-    buffer: Buffer,
-    filename: string,
-    sourceSheetName?: string
-  ): { fileType: string; sheetName: string | null; headers: string[]; rows: JsonRecord[] } {
-    const lower = filename.toLowerCase();
-    if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-      const sheetName = sourceSheetName && workbook.SheetNames.includes(sourceSheetName) ? sourceSheetName : workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json<JsonRecord>(worksheet, { defval: '' });
-      const headers = rows.length ? Object.keys(rows[0]) : [];
-      return {
-        fileType: lower.endsWith('.xls') ? 'xls' : 'xlsx',
-        sheetName: sheetName || null,
-        headers,
-        rows
-      };
-    }
-
-    const rows = parseCsv(buffer, {
-      bom: true,
-      columns: true,
-      skip_empty_lines: true,
-      trim: true
-    }) as JsonRecord[];
-    const headers = rows.length ? Object.keys(rows[0]) : [];
-    return {
-      fileType: 'csv',
-      sheetName: null,
-      headers,
-      rows
-    };
-  }
-
   private async uploadToS3(tenantCode: string, fileName: string, buffer: Buffer, contentType: string): Promise<string> {
     if (!env.S3_BUCKET) {
       throw new Error('S3_BUCKET is required for imports');
@@ -449,141 +409,6 @@ export class SupeV1Service {
       })
     );
     return key;
-  }
-
-  private buildRowKey(row: JsonRecord): Record<string, unknown> {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(row)) {
-      normalized[normalizeHeader(key)] = value;
-    }
-    return normalized;
-  }
-
-  private getMappedValue(
-    row: Record<string, unknown>,
-    mappingIndex: Map<string, string>,
-    targetEntity: string,
-    targetField: string,
-    fallbackHeaders: string[]
-  ): string {
-    const mapKey = `${targetEntity}.${targetField}`;
-    const mappedColumn = mappingIndex.get(mapKey);
-    if (mappedColumn && row[mappedColumn] !== undefined && row[mappedColumn] !== null && String(row[mappedColumn]).trim()) {
-      return String(row[mappedColumn]).trim();
-    }
-    return firstValue(row, fallbackHeaders.map(normalizeHeader));
-  }
-
-  private guessTypedValues(value: unknown): {
-    valueText: string | null;
-    valueNumeric: number | null;
-    valueDate: string | null;
-    valueTimestamp: string | null;
-    valueBoolean: boolean | null;
-    valueJson: unknown | null;
-  } {
-    if (value === undefined || value === null || value === '') {
-      return {
-        valueText: null,
-        valueNumeric: null,
-        valueDate: null,
-        valueTimestamp: null,
-        valueBoolean: null,
-        valueJson: null
-      };
-    }
-
-    if (typeof value === 'object') {
-      return {
-        valueText: JSON.stringify(value),
-        valueNumeric: null,
-        valueDate: null,
-        valueTimestamp: null,
-        valueBoolean: null,
-        valueJson: value
-      };
-    }
-
-    const valueText = String(value).trim();
-    const lowered = valueText.toLowerCase();
-    const valueBoolean = ['true', 'false', 'yes', 'no'].includes(lowered)
-      ? lowered === 'true' || lowered === 'yes'
-      : null;
-    const valueNumeric = toNumber(valueText);
-    const valueDate = toDateOnly(valueText);
-    const tsCandidate = new Date(valueText);
-    const valueTimestamp = Number.isNaN(tsCandidate.getTime()) ? null : tsCandidate.toISOString();
-
-    return {
-      valueText,
-      valueNumeric,
-      valueDate,
-      valueTimestamp,
-      valueBoolean,
-      valueJson: null
-    };
-  }
-
-  private async ensureDataSource(runner: QueryRunner, sourceCode: string): Promise<number> {
-    const rows = await runner.query(
-      `
-      insert into data_sources (source_code, source_name)
-      values ($1, $1)
-      on conflict (source_code) do update set source_name = excluded.source_name
-      returning id
-    `,
-      [sourceCode]
-    );
-    if (rows.length) {
-      return Number(rows[0].id);
-    }
-    const fallback = await runner.query(`select id from data_sources where source_code = $1 limit 1`, [sourceCode]);
-    return Number(fallback[0].id);
-  }
-
-  private async upsertSourceColumns(
-    runner: QueryRunner,
-    dataSourceId: number,
-    headers: string[]
-  ): Promise<Map<string, number>> {
-    const map = new Map<string, number>();
-    for (const header of headers) {
-      const normalized = normalizeHeader(header);
-      const rows = await runner.query(
-        `
-          insert into source_columns (data_source_id, column_name, normalized_name, is_active)
-          values ($1, $2, $3, true)
-          on conflict (data_source_id, column_name)
-          do update set normalized_name = excluded.normalized_name, is_active = true
-          returning id
-        `,
-        [dataSourceId, header, normalized]
-      );
-      map.set(header, Number(rows[0].id));
-    }
-    return map;
-  }
-
-  private async loadMappings(runner: QueryRunner, dataSourceId: number): Promise<Map<string, string>> {
-    const rows = await runner.query(
-      `
-        select m.target_entity, m.target_field, c.normalized_name
-        from source_column_mappings m
-        join source_columns c on c.id = m.source_column_id
-        where m.data_source_id = $1 and m.is_active = true
-        order by m.priority asc
-      `,
-      [dataSourceId]
-    );
-
-    const result = new Map<string, string>();
-    for (const row of rows) {
-      const key = `${row.target_entity}.${row.target_field}`;
-      if (!result.has(key)) {
-        result.set(key, row.normalized_name);
-      }
-    }
-    return result;
   }
 
   private async findOrCreateByName(
@@ -1329,207 +1154,6 @@ export class SupeV1Service {
     );
   }
 
-  private async canonicalizeRow(
-    runner: QueryRunner,
-    ctx: {
-      tenantId: number;
-      dataSourceId: number;
-      importBatchId: number;
-      rawRecordId: number;
-      row: Record<string, unknown>;
-      mappingIndex: Map<string, string>;
-    }
-  ): Promise<void> {
-    const { tenantId, dataSourceId, importBatchId, rawRecordId, row, mappingIndex } = ctx;
-
-    const zone = this.getMappedValue(row, mappingIndex, 'common', 'zone', ['Zone', 'zone']);
-    const region = this.getMappedValue(row, mappingIndex, 'common', 'region', ['Region', 'Sub_Zone', 'region', 'Outlet_City']);
-    const area = this.getMappedValue(row, mappingIndex, 'common', 'area', ['Area', 'State', 'area']);
-
-    const distributorCode = this.getMappedValue(row, mappingIndex, 'distributors', 'distributor_code', ['DB_Code', 'Distributor_Code']);
-    const distributorName = this.getMappedValue(row, mappingIndex, 'distributors', 'distributor_name', ['DB_Name', 'Distributor_Name']);
-    const distributorId = await this.upsertDistributor(runner, tenantId, {
-      code: distributorCode,
-      name: distributorName,
-      zone,
-      region,
-      area
-    });
-
-    const beatCode = this.getMappedValue(row, mappingIndex, 'beats', 'beat_code', ['Beat_ID', 'Beat_Code']);
-    const beatName = this.getMappedValue(row, mappingIndex, 'beats', 'beat_name', ['Beat_Name', 'beat_name']);
-    const beatId = await this.upsertBeat(runner, tenantId, {
-      code: beatCode,
-      name: beatName,
-      zone,
-      region,
-      area,
-      distributorId
-    });
-
-    const employeeCode = this.getMappedValue(row, mappingIndex, 'salesmen', 'employee_code', ['TM/SO_Code', 'employee_code']);
-    const externalSalesmanId = this.getMappedValue(row, mappingIndex, 'salesmen', 'external_salesman_id', ['Sale_User_ID']);
-    const salesmanName = this.getMappedValue(row, mappingIndex, 'salesmen', 'salesman_name', ['TM/SO_Name', 'Sale_Done_by']);
-    const salesmanPhone = this.getMappedValue(row, mappingIndex, 'salesmen', 'phone_number', ['TM/SO_Phone', 'phone_number']);
-    const salesmanId = await this.upsertSalesman(runner, tenantId, {
-      externalSalesmanId,
-      employeeCode,
-      name: salesmanName,
-      phoneNumber: salesmanPhone,
-      zone,
-      region,
-      area,
-      distributorId
-    });
-
-    const outletName = this.getMappedValue(row, mappingIndex, 'outlets', 'outlet_name', ['Outlet_Name']);
-    const externalOutletCode = this.getMappedValue(row, mappingIndex, 'outlets', 'external_outlet_code', ['Outlet_ID']);
-    const tenantOutletCode = this.getMappedValue(row, mappingIndex, 'tenant_outlets', 'tenant_outlet_code', ['Outlet_ID']);
-    const outletMobile = this.getMappedValue(row, mappingIndex, 'outlets', 'mobile_number', ['Mobile_Number', 'Outlet_Mobile']);
-    const outletAddress1 = this.getMappedValue(row, mappingIndex, 'outlets', 'address_line1', ['Address_1', 'Address']);
-    const outletAddress2 = this.getMappedValue(row, mappingIndex, 'outlets', 'address_line2', ['Address_2']);
-    const outletPincode = this.getMappedValue(row, mappingIndex, 'outlets', 'pincode', ['Pincode', 'Pin_Code']);
-    const outletGst = this.getMappedValue(row, mappingIndex, 'outlets', 'gst_number', ['GST_Number', 'GST_No']);
-    const orderDate = toDateOnly(
-      this.getMappedValue(row, mappingIndex, 'sales_orders', 'order_sale_date', ['Sale_Date', 'Order_Date', 'Invoice_Date'])
-    );
-
-    const { outletId, tenantOutletId } = await this.upsertOutletWithTenant(runner, tenantId, {
-      tenantOutletCode,
-      externalOutletCode,
-      outletName,
-      mobileNumber: outletMobile,
-      zone,
-      region,
-      area,
-      addressLine1: outletAddress1,
-      addressLine2: outletAddress2,
-      pincode: outletPincode,
-      gstNumber: outletGst,
-      beatId,
-      salesmanId,
-      distributorId,
-      orderDate
-    });
-
-    const brandName = this.getMappedValue(row, mappingIndex, 'brands', 'brand_name', ['Brand', 'Sub_Brand']);
-    const categoryName = this.getMappedValue(row, mappingIndex, 'sku_categories', 'category_name', ['Category', 'Segment']);
-    const brandId = await this.findOrCreateByName(runner, 'brands', 'brand_name', 'brand_code', brandName);
-    const categoryId = await this.findOrCreateByName(runner, 'sku_categories', 'category_name', 'category_code', categoryName);
-
-    const skuCode = this.getMappedValue(row, mappingIndex, 'skus', 'sku_code', ['SKU_Code', 'SKU_ID']);
-    const externalSkuId = this.getMappedValue(row, mappingIndex, 'skus', 'external_sku_id', ['SKU_ID']);
-    const skuName = this.getMappedValue(row, mappingIndex, 'skus', 'sku_name', ['Description', 'SKU_Name']);
-    const packSize = this.getMappedValue(row, mappingIndex, 'skus', 'pack_size', ['Pack_Size']);
-    const unitOfMeasure = this.getMappedValue(row, mappingIndex, 'skus', 'unit_of_measure', ['UOM']);
-    const skuId = await this.upsertSku(runner, {
-      skuCode,
-      externalSkuId,
-      skuName,
-      packSize,
-      unitOfMeasure,
-      mrp: toNumber(this.getMappedValue(row, mappingIndex, 'skus', 'mrp', ['MRP'])),
-      gstPercent: toNumber(this.getMappedValue(row, mappingIndex, 'skus', 'gst_percent', ['GST_Pct'])),
-      zone,
-      region,
-      area,
-      brandId,
-      categoryId
-    });
-
-    const externalInvoiceNo = this.getMappedValue(row, mappingIndex, 'sales_orders', 'external_invoice_no', ['Invoice_ID', 'Invoice_No']);
-    const externalAwbNo = this.getMappedValue(row, mappingIndex, 'sales_orders', 'external_awb_no', ['AWB_No']);
-    const externalOrderId = this.getMappedValue(row, mappingIndex, 'sales_orders', 'external_order_id', ['Order_ID']);
-    const orderPunchedAtRaw = this.getMappedValue(row, mappingIndex, 'sales_orders', 'order_punched_at', ['Order_Punched_At']);
-    const orderPunchedAt = orderPunchedAtRaw ? new Date(orderPunchedAtRaw).toISOString() : null;
-
-    const grossAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'gross_amount', ['Sale_Amount', 'Gross_Amount']));
-    const discountAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'discount_amount', ['Discount']));
-    const taxAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'tax_amount', ['Tax_Amount']));
-    const netAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'net_amount', ['Net_Sale_Amount', 'Net_Amount']));
-    const collectionsAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'collections_amount', ['Collection_Amount']));
-    const outstandingAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'outstanding_amount', ['Outstanding_Amount']));
-    const marginAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_orders', 'decided_margin_amount', ['Margin_Amount']));
-
-    const orderId = await this.upsertSalesOrder(runner, {
-      tenantId,
-      dataSourceId,
-      importBatchId,
-      externalOrderId,
-      externalInvoiceNo,
-      externalAwbNo,
-      orderDate,
-      orderPunchedAt,
-      outletId,
-      tenantOutletId,
-      beatId,
-      salesmanId,
-      distributorId,
-      grossAmount,
-      discountAmount,
-      taxAmount,
-      netAmount,
-      collectionsAmount,
-      outstandingAmount,
-      marginAmount,
-      remarks: '',
-      rawRecordId
-    });
-
-    if (skuId) {
-      const orderedQuantity = toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'ordered_quantity', ['Sale_Quantity'])) || 0;
-      const unitPrice = toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'unit_price', ['Unit_Price']));
-      const lineNetAmount = toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'net_amount', ['Net_Sale_Amount']));
-      const externalLineId =
-        this.getMappedValue(row, mappingIndex, 'sales_order_items', 'external_line_id', ['Line_ID']) ||
-        createHash('sha1')
-          .update(`${orderId}|${skuId}|${orderedQuantity}|${lineNetAmount || 0}|${orderDate || ''}`)
-          .digest('hex');
-
-      const orderItemId = await this.upsertSalesOrderItem(runner, {
-        salesOrderId: orderId,
-        skuId,
-        externalLineId,
-        orderedQuantity,
-        unitPrice,
-        grossAmount: toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'gross_amount', ['Sale_Amount'])),
-        discountAmount: toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'discount_amount', ['Discount'])),
-        taxAmount: toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'tax_amount', ['Tax_Amount'])),
-        netAmount: lineNetAmount,
-        marginPercent: toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'margin_percent', ['Margin_Pct'])),
-        marginAmount: toNumber(this.getMappedValue(row, mappingIndex, 'sales_order_items', 'margin_amount', ['Margin_Amount'])),
-        rawRecordId
-      });
-      await this.insertCanonicalLineage(runner, 'sales_order_items', orderItemId, rawRecordId, 'line_item');
-    }
-
-    const paymentAmount = toNumber(this.getMappedValue(row, mappingIndex, 'order_payments', 'amount', ['Payment_Amount']));
-    const paymentMode = this.getMappedValue(row, mappingIndex, 'order_payments', 'payment_mode', ['Payment_Mode']);
-    const paymentDate = toDateOnly(this.getMappedValue(row, mappingIndex, 'order_payments', 'payment_date', ['Payment_Date']));
-    const transactionRef = this.getMappedValue(row, mappingIndex, 'order_payments', 'external_ref', ['Transaction_Ref', 'External_Ref']);
-    if (paymentAmount && paymentAmount > 0) {
-      const existingPayment = await runner.query(
-        `
-          select id from order_payments
-          where tenant_id = $1 and sales_order_id = $2 and coalesce(external_ref,'') = coalesce($3,'') and coalesce(amount,0) = $4
-          limit 1
-        `,
-        [tenantId, orderId, transactionRef || null, paymentAmount]
-      );
-      if (!existingPayment.length) {
-        await runner.query(
-          `
-          insert into order_payments (tenant_id, sales_order_id, payment_date, payment_mode, amount, external_ref, source_record_id)
-          values ($1,$2,$3::date,$4,$5,$6,$7)
-        `,
-          [tenantId, orderId, paymentDate, paymentMode || null, paymentAmount, transactionRef || null, rawRecordId]
-        );
-      }
-    }
-
-    await this.insertCanonicalLineage(runner, 'sales_orders', orderId, rawRecordId, 'order');
-  }
-
   private async insertSnapshotMetric(
     runner: QueryRunner,
     payload: {
@@ -1816,13 +1440,15 @@ export class SupeV1Service {
       const coverage = total > 0 ? (active * 100) / total : 0;
       const visits = Number(row.visits_mtd || 0);
       const revenue = Number(row.revenue_mtd || 0);
+      const ebv = total * 2500;
+      const realization = ebv > 0 ? (revenue * 100) / ebv : 0;
       for (const [metricKey, metricValue, unit] of [
         ['revenue_mtd', revenue, 'currency'],
-        ['ebv', visits > 0 ? revenue / visits : 0, 'currency'],
+        ['ebv', ebv, 'currency'],
         ['total_retailers', total, 'number'],
         ['visits_mtd', visits, 'number'],
         ['coverage_pct', coverage, 'percent'],
-        ['realization_pct', coverage, 'percent'],
+        ['realization_pct', realization, 'percent'],
         ['outstanding', Number(row.total_outstanding || 0), 'currency'],
         ['mtd_outstanding', Number(row.mtd_outstanding || 0), 'currency']
       ] as Array<[string, number, string]>) {
@@ -1846,6 +1472,11 @@ export class SupeV1Service {
 
     const skuRows = await runner.query(
       `
+      with previous_period as (
+        select
+          $4::date as period_start,
+          $5::date as period_end
+      )
       select
         s.id::text as entity_id,
         s.name as entity_name,
@@ -1854,7 +1485,16 @@ export class SupeV1Service {
         max(o.area) as area,
         coalesce(sum(soi.amount), 0) as revenue_mtd,
         coalesce(sum(soi.ordered_quantity), 0) as units_mtd,
-        count(distinct so.outlet_id) as outlets_mtd
+        count(distinct so.outlet_id) as outlets_mtd,
+        coalesce((
+          select sum(soi_prev.amount)
+          from sales_order_items soi_prev
+          join sales_orders so_prev on so_prev.id = soi_prev.sales_order_id
+          join previous_period pp on true
+          where soi_prev.sku_id = s.id
+            and so_prev.tenant_id = $1
+            and so_prev.order_sale_date between pp.period_start and pp.period_end
+        ), 0) as revenue_prev
       from skus s
       left join sales_order_items soi on soi.sku_id = s.id
       left join sales_orders so
@@ -1863,7 +1503,13 @@ export class SupeV1Service {
       where s.tenant_id = $1 and s.active = true
       group by s.id, s.name
       `,
-      [tenantId, range.start, range.end]
+      [
+        tenantId,
+        range.start,
+        range.end,
+        startOfMonth(this.previousComparableMonthDate(range.end)),
+        this.previousComparableMonthDate(range.end)
+      ]
     );
     const outletCountRows = await runner.query(`select count(*)::int as total from tenant_outlets where tenant_id = $1 and active = true`, [
       tenantId
@@ -1871,12 +1517,15 @@ export class SupeV1Service {
     const totalOutlets = Number(outletCountRows[0]?.total || 0);
     for (const row of skuRows) {
       const outlets = Number(row.outlets_mtd || 0);
+      const revenue = Number(row.revenue_mtd || 0);
+      const previousRevenue = Number(row.revenue_prev || 0);
+      const growthPct = previousRevenue > 0 ? ((revenue - previousRevenue) * 100) / previousRevenue : revenue > 0 ? 100 : 0;
       for (const [metricKey, metricValue, unit] of [
-        ['revenue_mtd', Number(row.revenue_mtd || 0), 'currency'],
+        ['revenue_mtd', revenue, 'currency'],
         ['units_mtd', Number(row.units_mtd || 0), 'number'],
         ['outlets_mtd', outlets, 'number'],
         ['penetration_pct', totalOutlets > 0 ? (outlets * 100) / totalOutlets : 0, 'percent'],
-        ['growth_pct', 0, 'percent']
+        ['growth_pct', growthPct, 'percent']
       ] as Array<[string, number, string]>) {
         await this.insertSnapshotMetric(runner, {
           tenantId,
@@ -2095,6 +1744,13 @@ export class SupeV1Service {
 
   private async evaluateSignalsInternal(runner: QueryRunner, tenantId: number, triggeredBy: string): Promise<number> {
     const runToken = Date.now();
+    const existingSignals = await runner.query(`select source_key, action_state from entity_signals where tenant_id = $1`, [tenantId]);
+    const existingActionStateBySourceKey = new Map<string, string>();
+    for (const signal of existingSignals) {
+      if (signal?.source_key) {
+        existingActionStateBySourceKey.set(String(signal.source_key), String(signal.action_state || 'new'));
+      }
+    }
     await runner.query(`delete from entity_signals where tenant_id = $1`, [tenantId]);
     const latestDateRows = await runner.query(`select max(snapshot_date) as latest_date from entity_metric_snapshots where tenant_id = $1`, [
       tenantId
@@ -2154,15 +1810,18 @@ export class SupeV1Service {
         if (!this.evaluateOperator(def.comparison_operator, observedValue, thresholdValue)) {
           continue;
         }
+        const sourceKey = this.buildSignalSourceKey(String(def.entity_type), String(snapshot.entity_id || ''), String(def.signal_key || ''));
+        const actionState = existingActionStateBySourceKey.get(sourceKey) || 'new';
 
         await runner.query(
           `
             insert into entity_signals (
               tenant_id, signal_definition_id, entity_type, entity_id, entity_name, severity, signal_key, headline,
               description, metric_key, observed_value, threshold_value, comparison_operator, breach_amount, zone, region, area,
+              source_key, action_state,
               window_start_date, window_end_date, metadata
             )
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::date,$19::date,$20::jsonb)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::date,$21::date,$22::jsonb)
           `,
           [
             tenantId,
@@ -2182,6 +1841,8 @@ export class SupeV1Service {
             snapshot.zone || null,
             snapshot.region || null,
             snapshot.area || null,
+            sourceKey,
+            actionState,
             range.startDate,
             range.endDate,
             JSON.stringify({
@@ -2335,64 +1996,192 @@ export class SupeV1Service {
     return errors;
   }
 
-  private async runPostImportSync(tenantId: number, triggeredBy: string): Promise<{ signalRunId: number }> {
-    const runner = this.db.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction();
-    try {
-      await this.refreshSnapshots(runner, tenantId);
-      const signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
-      await this.recomputeTargetProgressInternal(runner, tenantId);
-      await runner.commitTransaction();
-      return { signalRunId };
-    } catch (error) {
-      await runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await runner.release();
+  private validateOrdersBookStructure(headers: string[], rows: OrdersBookRow[]): ImportRowError[] {
+    const errors: ImportRowError[] = [];
+    if (!rows.length) {
+      errors.push({
+        sNo: 'HEADER',
+        rowNumber: 1,
+        column: 'orders_book',
+        message: 'sheet has no data rows'
+      });
+      return errors;
     }
+
+    const maxColumns = Math.max(headers.length, ORDERS_BOOK_HEADERS.length);
+    for (let index = 0; index < maxColumns; index += 1) {
+      const expected = ORDERS_BOOK_HEADERS[index] || '';
+      const actual = headers[index] || '';
+      if (expected !== actual) {
+        errors.push({
+          sNo: 'HEADER',
+          rowNumber: 1,
+          column: `col_${index + 1}`,
+          message: `Expected "${expected}" but found "${actual}"`
+        });
+      }
+    }
+
+    return errors;
   }
 
-  async createImport(user: IAuthUser | undefined, file: ImportableFile, meta?: { sourceCode?: string; sourceSheetName?: string }) {
-    void meta;
-    const tenantId = await this.resolveTenantId(user);
-    const tenantCode = this.resolveTenantCode(user);
-    const buffer = await file.toBuffer();
-    const checksum = createHash('sha256').update(buffer).digest('hex');
-    const { headers, rows } = this.parseOrdersBook(buffer, file.filename);
-    const objectKey = env.S3_BUCKET ? await this.uploadToS3(tenantCode, file.filename, buffer, file.mimetype) : null;
+  private async downloadFromS3(objectKey: string): Promise<Buffer> {
+    if (!env.S3_BUCKET) {
+      throw Object.assign(new Error('S3_BUCKET is required for imports'), { statusCode: 500 });
+    }
 
-    const batchRows = await this.db.query(
+    const response = await this.s3Client.send(
+      new GetObjectCommand({
+        Bucket: env.S3_BUCKET,
+        Key: objectKey
+      })
+    );
+    const bytes = await response.Body?.transformToByteArray();
+    if (!bytes) {
+      throw new Error('Unable to read uploaded import file');
+    }
+    return Buffer.from(bytes);
+  }
+
+  private async createImportBatchRecord(payload: {
+    tenantId: number;
+    sourceFileName: string;
+    fileChecksum: string;
+    fileObjectKey: string | null;
+    totalRows: number;
+    totalColumns: number;
+    importStatus: string;
+    notes?: string | null;
+    validRows?: number;
+    rejectedRows?: number;
+    errorCount?: number;
+    startedAt?: boolean;
+    completedAt?: boolean;
+    processedBy?: string | null;
+  }): Promise<number> {
+    const rows = await this.db.query(
       `
       insert into import_batches (
         tenant_id, source_file_name, source_file_type, source_sheet_name, file_checksum, file_object_key,
-        total_rows, total_columns, valid_rows, rejected_rows, import_status, notes
+        total_rows, total_columns, valid_rows, rejected_rows, error_count, import_status, notes, started_at, completed_at, processed_by
       )
-      values ($1,$2,'xlsx','orders_book',$3,$4,$5,$6,0,0,'PROCESSING',null)
+      values (
+        $1,$2,'xlsx','orders_book',$3,$4,$5,$6,$7,$8,$9,$10,$11,
+        ${payload.startedAt ? 'now()' : 'null'},
+        ${payload.completedAt ? 'now()' : 'null'},
+        $12
+      )
       returning id
       `,
-      [tenantId, file.filename, checksum, objectKey, rows.length, headers.length]
+      [
+        payload.tenantId,
+        payload.sourceFileName,
+        payload.fileChecksum,
+        payload.fileObjectKey,
+        payload.totalRows,
+        payload.totalColumns,
+        payload.validRows ?? 0,
+        payload.rejectedRows ?? 0,
+        payload.errorCount ?? 0,
+        payload.importStatus,
+        payload.notes ?? null,
+        payload.processedBy ?? null
+      ]
     );
-    const batchId = Number(batchRows[0].id);
+    return Number(rows[0]?.id);
+  }
 
-    const validationErrors = this.validateOrdersBook(headers, rows);
-    if (validationErrors.length) {
+  private async insertImportErrors(batchId: number, errors: ImportRowError[], phase: ImportErrorPhase): Promise<void> {
+    const limitedErrors = errors.slice(0, 1000);
+    for (const error of limitedErrors) {
       await this.db.query(
         `
-        update import_batches
-        set valid_rows = 0,
-            rejected_rows = $2,
-            import_status = 'FAILED',
-            notes = $3
-        where id = $1
+        insert into import_batch_errors (import_batch_id, row_number, s_no, column_name, message, phase)
+        values ($1,$2,$3,$4,$5,$6)
         `,
-        [batchId, rows.length, JSON.stringify(validationErrors.slice(0, 200))]
+        [batchId, error.rowNumber, error.sNo, error.column, error.message, phase]
       );
-      const error = new ImportValidationError('Import validation failed', validationErrors);
-      (error as any).batchId = batchId;
-      throw error;
     }
+  }
 
+  private async failImportBatch(
+    batchId: number,
+    summary: string,
+    errors: ImportRowError[],
+    phase: ImportErrorPhase,
+    rejectedRows: number
+  ): Promise<void> {
+    await this.insertImportErrors(batchId, errors, phase);
+    await this.db.query(
+      `
+      update import_batches
+      set valid_rows = 0,
+          rejected_rows = $2,
+          error_count = $3,
+          import_status = 'FAILED',
+          notes = $4,
+          completed_at = now()
+      where id = $1
+      `,
+      [batchId, rejectedRows, errors.length, summary]
+    );
+  }
+
+  private importBatchSummaryFromRow(row: any): ImportBatchSummary {
+    return {
+      id: Number(row.id),
+      tenantId: Number(row.tenant_id),
+      sourceFileName: String(row.source_file_name),
+      sourceFileType: row.source_file_type || null,
+      sourceSheetName: row.source_sheet_name || null,
+      fileChecksum: row.file_checksum || null,
+      fileObjectKey: row.file_object_key || null,
+      totalRows: Number(row.total_rows || 0),
+      totalColumns: Number(row.total_columns || 0),
+      validRows: Number(row.valid_rows || 0),
+      rejectedRows: Number(row.rejected_rows || 0),
+      errorCount: Number(row.error_count || 0),
+      importStatus: String(row.import_status),
+      notes: row.notes || null,
+      startedAt: row.started_at || null,
+      completedAt: row.completed_at || null,
+      processedBy: row.processed_by || null,
+      importedAt: row.imported_at,
+      createdAt: row.created_at
+    };
+  }
+
+  private async getImportBatchById(importId: number): Promise<ImportBatchSummary | null> {
+    const rows = await this.db.query(`select * from import_batches where id = $1 limit 1`, [importId]);
+    if (!rows.length) {
+      return null;
+    }
+    return this.importBatchSummaryFromRow(rows[0]);
+  }
+
+  private async listImportErrors(batchId: number, limit = IMPORT_DETAIL_ERROR_LIMIT) {
+    const rows = await this.db.query(
+      `
+      select row_number, s_no, column_name, message, phase, created_at
+      from import_batch_errors
+      where import_batch_id = $1
+      order by id asc
+      limit $2
+      `,
+      [batchId, limit]
+    );
+
+    return rows.map((row: any) => ({
+      rowNumber: Number(row.row_number || 0),
+      sNo: String(row.s_no || ''),
+      column: String(row.column_name || ''),
+      message: String(row.message || ''),
+      phase: String(row.phase || ''),
+      createdAt: row.created_at
+    }));
+  }
+
+  private async persistOrdersBookRows(tenantId: number, batchId: number, rows: OrdersBookRow[]): Promise<void> {
     const runner = this.db.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
@@ -2943,68 +2732,245 @@ export class SupeV1Service {
       }
 
       await runner.commitTransaction();
-    } catch (error: any) {
+    } catch (error) {
       await runner.rollbackTransaction();
-      await this.db.query(
-        `
-        update import_batches
-        set valid_rows = 0,
-            rejected_rows = $2,
-            import_status = 'FAILED',
-            notes = $3
-        where id = $1
-        `,
-        [batchId, rows.length, String(error?.message || 'Import failed')]
-      );
       throw error;
     } finally {
       await runner.release();
     }
+  }
 
-    await this.db.query(
+  private async runPostImportSync(tenantId: number, triggeredBy: string): Promise<{ signalRunId: number }> {
+    const runner = this.db.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      await this.refreshSnapshots(runner, tenantId);
+      const signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
+      await this.recomputeTargetProgressInternal(runner, tenantId);
+      await runner.commitTransaction();
+      return { signalRunId };
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  async createImport(user: IAuthUser | undefined, file: ImportableFile) {
+    if (!env.S3_BUCKET) {
+      throw Object.assign(new Error('S3_BUCKET is required for imports'), { statusCode: 500 });
+    }
+
+    const tenantId = await this.resolveTenantId(user);
+    const tenantCode = this.resolveTenantCode(user);
+    const buffer = await file.toBuffer();
+    const checksum = createHash('sha256').update(buffer).digest('hex');
+
+    let headers: string[] = [];
+    let rows: OrdersBookRow[] = [];
+    try {
+      const parsed = this.parseOrdersBook(buffer, file.filename);
+      headers = parsed.headers;
+      rows = parsed.rows;
+    } catch (error: any) {
+      const parseErrors: ImportRowError[] = [
+        {
+          sNo: 'HEADER',
+          rowNumber: 1,
+          column: 'orders_book',
+          message: String(error?.message || 'Unable to parse workbook')
+        }
+      ];
+      const batchId = await this.createImportBatchRecord({
+        tenantId,
+        sourceFileName: file.filename,
+        fileChecksum: checksum,
+        fileObjectKey: null,
+        totalRows: 0,
+        totalColumns: 0,
+        importStatus: 'FAILED',
+        notes: 'Import prevalidation failed',
+        rejectedRows: 0,
+        errorCount: parseErrors.length,
+        completedAt: true
+      });
+      await this.insertImportErrors(batchId, parseErrors, 'prevalidation');
+      const validationError = new ImportValidationError('Import prevalidation failed', parseErrors);
+      (validationError as any).batchId = batchId;
+      throw validationError;
+    }
+
+    const prevalidationErrors = this.validateOrdersBookStructure(headers, rows);
+    if (prevalidationErrors.length) {
+      const batchId = await this.createImportBatchRecord({
+        tenantId,
+        sourceFileName: file.filename,
+        fileChecksum: checksum,
+        fileObjectKey: null,
+        totalRows: rows.length,
+        totalColumns: headers.length,
+        importStatus: 'FAILED',
+        notes: 'Import prevalidation failed',
+        rejectedRows: rows.length,
+        errorCount: prevalidationErrors.length,
+        completedAt: true
+      });
+      await this.insertImportErrors(batchId, prevalidationErrors, 'prevalidation');
+      const validationError = new ImportValidationError('Import prevalidation failed', prevalidationErrors);
+      (validationError as any).batchId = batchId;
+      throw validationError;
+    }
+
+    const objectKey = await this.uploadToS3(tenantCode, file.filename, buffer, file.mimetype);
+    const batchId = await this.createImportBatchRecord({
+      tenantId,
+      sourceFileName: file.filename,
+      fileChecksum: checksum,
+      fileObjectKey: objectKey,
+      totalRows: rows.length,
+      totalColumns: headers.length,
+      importStatus: 'QUEUED'
+    });
+
+    return {
+      batchId,
+      status: 'QUEUED',
+      totalRows: rows.length,
+      totalColumns: headers.length
+    };
+  }
+
+  async processNextQueuedImport(workerId: string): Promise<boolean> {
+    const rows = await this.db.query(
       `
-      update import_batches
-      set valid_rows = $2,
-          rejected_rows = 0,
-          import_status = 'IMPORTED',
-          notes = null
-      where id = $1
+      with candidate as (
+        select id
+        from import_batches
+        where import_status = 'QUEUED'
+        order by created_at asc
+        for update skip locked
+        limit 1
+      )
+      update import_batches b
+      set import_status = 'PROCESSING',
+          started_at = now(),
+          completed_at = null,
+          processed_by = $1,
+          notes = 'processing'
+      from candidate
+      where b.id = candidate.id
+      returning b.id
       `,
-      [batchId, rows.length]
+      [workerId]
     );
 
+    const batchId = Number(rows[0]?.id || 0);
+    if (!batchId) {
+      return false;
+    }
+
+    const batch = await this.getImportBatchById(batchId);
+    if (!batch?.fileObjectKey) {
+      await this.failImportBatch(
+        batchId,
+        'Import file is missing from object storage',
+        [{ sNo: 'SYSTEM', rowNumber: 0, column: 'file', message: 'file_object_key is missing' }],
+        'processing',
+        batch?.totalRows || 0
+      );
+      return true;
+    }
+
+    let parsedRows: OrdersBookRow[] = [];
+    let headers: string[] = [];
     try {
-      const postImport = await this.runPostImportSync(tenantId, user?.id || `import:${batchId}`);
+      const buffer = await this.downloadFromS3(batch.fileObjectKey);
+      const parsed = this.parseOrdersBook(buffer, batch.sourceFileName);
+      headers = parsed.headers;
+      parsedRows = parsed.rows;
+    } catch (error: any) {
+      await this.failImportBatch(
+        batchId,
+        String(error?.message || 'Unable to download or parse queued import'),
+        [{ sNo: 'SYSTEM', rowNumber: 0, column: 'file', message: String(error?.message || 'Queued import parse failed') }],
+        'processing',
+        batch.totalRows || 0
+      );
+      throw error;
+    }
+
+    const validationErrors = this.validateOrdersBook(headers, parsedRows);
+    if (validationErrors.length) {
+      await this.failImportBatch(batchId, 'Import validation failed', validationErrors, 'validation', parsedRows.length);
+      return true;
+    }
+
+    try {
+      await this.persistOrdersBookRows(batch.tenantId, batchId, parsedRows);
+      await this.db.query(
+        `
+        update import_batches
+        set valid_rows = $2,
+            rejected_rows = 0,
+            error_count = 0,
+            import_status = 'IMPORTED',
+            notes = null
+        where id = $1
+        `,
+        [batchId, parsedRows.length]
+      );
+    } catch (error: any) {
+      await this.failImportBatch(
+        batchId,
+        String(error?.message || 'Import failed during processing'),
+        [{ sNo: 'SYSTEM', rowNumber: 0, column: 'processing', message: String(error?.message || 'Import failed') }],
+        'processing',
+        parsedRows.length
+      );
+      throw error;
+    }
+
+    try {
+      const postImport = await this.runPostImportSync(batch.tenantId, workerId);
       await this.db.query(
         `
         update import_batches
         set import_status = 'COMPLETED',
-            notes = $2
+            notes = $2,
+            completed_at = now()
         where id = $1
         `,
         [batchId, `signal_run=${postImport.signalRunId}`]
       );
-    } catch (postError: any) {
-      await this.db.query(
-        `
-        update import_batches
-        set import_status = 'FAILED',
-            notes = $2
-        where id = $1
-        `,
-        [batchId, `post_import_failed: ${String(postError?.message || 'unknown error')}`]
+    } catch (error: any) {
+      await this.failImportBatch(
+        batchId,
+        `post_import_failed: ${String(error?.message || 'unknown error')}`,
+        [{ sNo: 'SYSTEM', rowNumber: 0, column: 'post_import', message: String(error?.message || 'Post import failed') }],
+        'post_import',
+        parsedRows.length
       );
-      throw postError;
+      throw error;
     }
 
-    return {
-      batchId,
-      status: 'COMPLETED',
-      totalRows: rows.length,
-      validRows: rows.length,
-      rejectedRows: 0,
-      errors: []
-    };
+    return true;
+  }
+
+  async listImports(user: IAuthUser | undefined, limit = 20) {
+    const tenantId = await this.resolveTenantId(user);
+    const rows = await this.db.query(
+      `
+      select *
+      from import_batches
+      where tenant_id = $1
+      order by created_at desc
+      limit $2
+      `,
+      [tenantId, limit]
+    );
+    return rows.map((row: any) => this.importBatchSummaryFromRow(row));
   }
 
   async getImportById(user: IAuthUser | undefined, importId: number) {
@@ -3013,7 +2979,11 @@ export class SupeV1Service {
     if (!rows.length) {
       throw new Error('Import not found');
     }
-    return rows[0];
+
+    return {
+      ...this.importBatchSummaryFromRow(rows[0]),
+      errors: await this.listImportErrors(importId)
+    };
   }
 
   private async latestSnapshotDate(tenantId: number): Promise<string | null> {
@@ -3088,16 +3058,272 @@ export class SupeV1Service {
     };
   }
 
+  private formatBriefingCurrency(value: number): string {
+    return `₹${Math.round(Number(value || 0)).toLocaleString('en-IN')}`;
+  }
+
+  private previousComparableMonthDate(value: string): string {
+    const { year, month, day } = getDateParts(value);
+    const previousMonth = month === 1 ? 12 : month - 1;
+    const previousYear = month === 1 ? year - 1 : year;
+    const previousMonthDays = new Date(Date.UTC(previousYear, previousMonth, 0)).getUTCDate();
+    return formatDateParts(previousYear, previousMonth, Math.min(day, previousMonthDays));
+  }
+
+  private async resolveLatestSnapshotOnOrBefore(tenantId: number, value: string): Promise<string | null> {
+    const rows = await this.db.query(
+      `select max(snapshot_date) as snapshot_date from entity_metric_snapshots where tenant_id = $1 and snapshot_date <= $2::date`,
+      [tenantId, value]
+    );
+    return toDateOnly(rows[0]?.snapshot_date) || null;
+  }
+
+  private buildExploreDrillPath(entityType?: string | null): string {
+    const normalized = String(entityType || '').toLowerCase();
+    if (['salesman', 'retailer', 'sku', 'distributor', 'beat'].includes(normalized)) {
+      return `/explore?entity=${normalized}`;
+    }
+    return '/summary';
+  }
+
+  private buildSignalSourceKey(entityType: string, entityId: string, signalKey: string): string {
+    return `${String(entityType || '').toLowerCase()}:${String(entityId || '')}:${String(signalKey || '').toLowerCase()}`;
+  }
+
+  private getFiscalQuarterLabel(value: string): string {
+    const { year, month } = getDateParts(value);
+    const fiscalQuarter = Math.floor((((month - 4 + 12) % 12) / 3)) + 1;
+    const fiscalYear = month >= 4 ? year + 1 : year;
+    return `Q${fiscalQuarter} FY${String(fiscalYear).slice(-2)}`;
+  }
+
+  private formatBriefingDateLabel(value: string): string {
+    return new Date(`${value}T00:00:00.000Z`).toLocaleDateString('en-IN', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    });
+  }
+
+  private formatExplorePeriodLabel(value: string): string {
+    return new Date(`${value}T00:00:00.000Z`).toLocaleDateString('en-IN', {
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC'
+    });
+  }
+
+  private summarizeDeliverySummary(input: any, fallbackTargetCount = 0): string {
+    const summary = input && typeof input === 'object' ? input : {};
+    const delivered = Number(summary.delivered || 0);
+    const responded = Number(summary.responded || 0);
+    const targetCount = Number(summary.targetCount || fallbackTargetCount || 0);
+    if (targetCount > 0) {
+      return `${delivered}/${targetCount} delivered${responded > 0 ? ` · ${responded} responded` : ''}`;
+    }
+    return delivered > 0 || responded > 0 ? `${delivered} delivered${responded > 0 ? ` · ${responded} responded` : ''}` : 'Not sent yet';
+  }
+
+  private mapActionTypeLabel(value: string): string {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'goal_push') return 'Goal Push';
+    if (normalized === 'collection') return 'Collection Drive';
+    if (normalized === 'scheme') return 'Trade Scheme';
+    if (normalized === 'announcement') return 'Announcement';
+    return 'Nudge';
+  }
+
+  private async fetchActionDashboardInternal(tenantId: number) {
+    const statsRows = await this.db.query(
+      `
+      select status, count(*)::int as count
+      from actions
+      where tenant_id = $1
+      group by status
+      `,
+      [tenantId]
+    );
+    const recentRows = await this.db.query(
+      `
+      select
+        a.*,
+        count(distinct at.id)::int as target_count
+      from actions a
+      left join action_targets at on at.action_id = a.id
+      where a.tenant_id = $1
+      group by a.id
+      order by a.updated_at desc
+      limit 6
+      `,
+      [tenantId]
+    );
+
+    const counts: Record<string, number> = {};
+    for (const row of statsRows as any[]) {
+      counts[String(row.status)] = Number(row.count || 0);
+    }
+
+    return {
+      runningCount: counts.active || 0,
+      draftCount: counts.draft || 0,
+      totalCount: Object.values(counts).reduce((sum: number, value: number) => sum + Number(value || 0), 0),
+      items: recentRows.map((row: any) => ({
+        id: Number(row.id),
+        title: row.title,
+        type: this.mapActionTypeLabel(String(row.type || '')),
+        rawType: row.type,
+        status: row.status,
+        sourceKind: row.source_kind,
+        sourceEntityType: row.source_entity_type,
+        sourceEntityId: row.source_entity_id,
+        sourceEntityName: row.source_entity_name,
+        audienceType: row.audience_type,
+        targetCount: Number(row.target_count || 0),
+        deliverySummary: this.summarizeDeliverySummary(row.delivery_summary, Number(row.target_count || 0)),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }))
+    };
+  }
+
+  private async fetchActionLogInternal(tenantId: number) {
+    const entries = await this.db.query(
+      `
+      select
+        ae.id,
+        ae.event_type,
+        ae.label,
+        ae.detail,
+        ae.created_at,
+        a.id as action_id,
+        a.title as action_title,
+        a.type as action_type
+      from action_events ae
+      join actions a on a.id = ae.action_id
+      where ae.tenant_id = $1
+      order by ae.created_at desc
+      limit 60
+      `,
+      [tenantId]
+    );
+    const tasks = await this.db.query(
+      `
+      select *
+      from action_tasks
+      where tenant_id = $1
+      order by created_at desc
+      limit 100
+      `,
+      [tenantId]
+    );
+    const today = getCurrentISTDate();
+    const toDate = (value: string) => formatISTDate(new Date(value));
+    const todayEntries = entries.filter((entry: any) => toDate(String(entry.created_at)) === today);
+    const olderEntries = entries.filter((entry: any) => toDate(String(entry.created_at)) !== today);
+    const openTasks = tasks.filter((task: any) => task.status === 'open');
+    const doneTasks = tasks.filter((task: any) => task.status === 'done');
+
+    return {
+      todayCount: todayEntries.length,
+      openTaskCount: openTasks.length,
+      today: todayEntries.map((entry: any) => ({
+        id: Number(entry.id),
+        actionId: Number(entry.action_id),
+        timestamp: entry.created_at,
+        type: entry.event_type,
+        label: entry.label,
+        detail: entry.detail || entry.action_title || null
+      })),
+      earlier: olderEntries.map((entry: any) => ({
+        id: Number(entry.id),
+        actionId: Number(entry.action_id),
+        timestamp: entry.created_at,
+        type: entry.event_type,
+        label: entry.label,
+        detail: entry.detail || entry.action_title || null
+      })),
+      tasks: {
+        open: openTasks.map((task: any) => ({
+          id: Number(task.id),
+          actionId: task.action_id ? Number(task.action_id) : null,
+          assignee: task.assignee,
+          instruction: task.instruction,
+          deadline: task.deadline,
+          entityType: task.entity_type,
+          entityId: task.entity_id,
+          entityName: task.entity_name,
+          status: task.status,
+          createdAt: task.created_at
+        })),
+        done: doneTasks.map((task: any) => ({
+          id: Number(task.id),
+          actionId: task.action_id ? Number(task.action_id) : null,
+          assignee: task.assignee,
+          instruction: task.instruction,
+          deadline: task.deadline,
+          entityType: task.entity_type,
+          entityId: task.entity_id,
+          entityName: task.entity_name,
+          status: task.status,
+          createdAt: task.created_at
+        }))
+      }
+    };
+  }
+
   async getObserveSummary(user?: IAuthUser) {
     const tenantId = await this.resolveTenantId(user);
     const latestDate = await this.latestSnapshotDate(tenantId);
     if (!latestDate) {
       return {
-        period: { label: 'MTD', dayElapsed: 0, daysInPeriod: 0, quarter: '-' },
+        period: {
+          label: 'MTD',
+          periodLabel: '-',
+          quarter: '-',
+          quarterLabel: '-',
+          dateLabel: '-',
+          dayElapsed: 0,
+          daysInPeriod: 0
+        },
         summarySection: { metricCards: [], goals: [], periodIntelligence: [], entityPulseCards: [] },
-        intelligence: []
+        intelligence: [],
+        briefing: {
+          attention: [],
+          team: {
+            totalSalesmen: 0,
+            onTarget: 0,
+            atRisk: 0,
+            behind: 0,
+            topPerformer: { name: '-', revenue: this.formatBriefingCurrency(0), pct: 0 },
+            bottomPerformer: { name: '-', revenue: this.formatBriefingCurrency(0), pct: 0 }
+          },
+          whatChanged: {
+            period: { current: '-', previous: '-' },
+            improvingCount: 0,
+            decliningCount: 0,
+            flatCount: 0,
+            highlights: [],
+            bigMovers: []
+          },
+          retailerHealth: {
+            totalRetailers: 0,
+            tiers: [
+              { tier: 'platinum', label: 'Platinum', count: 0, dormantCount: 0 },
+              { tier: 'gold', label: 'Gold', count: 0, dormantCount: 0 },
+              { tier: 'silver', label: 'Silver', count: 0, dormantCount: 0 },
+              { tier: 'bronze', label: 'Bronze', count: 0, dormantCount: 0 }
+            ]
+          },
+          goalsPreview: { count: 0, items: [] },
+          activeActions: { runningCount: 0, draftCount: 0, totalCount: 0, items: [] },
+          anomalies: { criticalCount: 0, warningCount: 0, totalCount: 0, items: [] }
+        }
       };
     }
+
+    const actionDashboard = await this.fetchActionDashboardInternal(tenantId);
 
     const summaryRows = await this.db.query(
       `
@@ -3114,11 +3340,11 @@ export class SupeV1Service {
 
     const signals = await this.db.query(
       `
-      select id, signal_key, severity, headline, description
+      select id, signal_key, severity, headline, description, entity_type, entity_id, entity_name, detected_at
       from entity_signals
       where tenant_id = $1
       order by detected_at desc
-      limit 10
+      limit 200
       `,
       [tenantId]
     );
@@ -3180,29 +3406,300 @@ export class SupeV1Service {
       accent: '#4463ea',
       daysLeft: target.periodLabel || ''
     }));
+
+    const previousComparableDate = this.previousComparableMonthDate(latestDate);
+    const previousSnapshotDate = await this.resolveLatestSnapshotOnOrBefore(tenantId, previousComparableDate);
+    const comparisonMetrics = [
+      'revenue_mtd',
+      'collection_mtd',
+      'coverage_pct',
+      'beat_adherence_pct',
+      'aov',
+      'outstanding',
+      'dormancy_days',
+      'units_mtd',
+      'penetration_pct',
+      'orders_mtd',
+      'realization_pct'
+    ];
+    const comparisonEntityTypes = ['salesman', 'retailer', 'sku', 'distributor', 'beat'];
+
+    const currentComparisonRows = await this.db.query(
+      `
+      select entity_type, entity_id, max(entity_name) as entity_name, metric_key, max(metric_value) as metric_value
+      from entity_metric_snapshots
+      where tenant_id = $1
+        and snapshot_date = $2::date
+        and entity_type = any($3::text[])
+        and metric_key = any($4::text[])
+      group by entity_type, entity_id, metric_key
+      `,
+      [tenantId, latestDate, comparisonEntityTypes, comparisonMetrics]
+    );
+
+    const previousComparisonRows = previousSnapshotDate
+      ? await this.db.query(
+          `
+          select entity_type, entity_id, max(entity_name) as entity_name, metric_key, max(metric_value) as metric_value
+          from entity_metric_snapshots
+          where tenant_id = $1
+            and snapshot_date = $2::date
+            and entity_type = any($3::text[])
+            and metric_key = any($4::text[])
+          group by entity_type, entity_id, metric_key
+          `,
+          [tenantId, previousSnapshotDate, comparisonEntityTypes, comparisonMetrics]
+        )
+      : [];
+
+    const buildEntityMetricMap = (rows: any[]) => {
+      const map = new Map<string, { entityType: string; entityId: string; entityName: string; metrics: Record<string, number> }>();
+      for (const row of rows) {
+        const key = `${row.entity_type}:${row.entity_id}`;
+        const existing =
+          map.get(key) ||
+          {
+            entityType: String(row.entity_type),
+            entityId: String(row.entity_id),
+            entityName: String(row.entity_name || row.entity_id),
+            metrics: {}
+          };
+        existing.metrics[String(row.metric_key)] = Number(row.metric_value || 0);
+        map.set(key, existing);
+      }
+      return map;
+    };
+
+    const currentMetricMap = buildEntityMetricMap(currentComparisonRows);
+    const previousMetricMap = buildEntityMetricMap(previousComparisonRows);
+
+    const salesmanSnapshot = Array.from(currentMetricMap.values()).filter((item) => item.entityType === 'salesman');
+    const totalSalesmen = salesmanSnapshot.length;
+    const averageSalesmanRevenue =
+      totalSalesmen > 0
+        ? salesmanSnapshot.reduce((sum, item) => sum + Number(item.metrics.revenue_mtd || 0), 0) / totalSalesmen
+        : 0;
+    const targetRevenue = averageSalesmanRevenue * 1.1;
+    let onTarget = 0;
+    let atRisk = 0;
+    let behind = 0;
+    const rankedSalesmen = [...salesmanSnapshot].sort(
+      (left, right) => Number(right.metrics.revenue_mtd || 0) - Number(left.metrics.revenue_mtd || 0)
+    );
+    for (const item of salesmanSnapshot) {
+      const pct = targetRevenue > 0 ? (Number(item.metrics.revenue_mtd || 0) * 100) / targetRevenue : 0;
+      if (pct >= 90) {
+        onTarget += 1;
+      } else if (pct >= 70) {
+        atRisk += 1;
+      } else {
+        behind += 1;
+      }
+    }
+    const topSalesman = rankedSalesmen[0];
+    const bottomSalesman = rankedSalesmen[rankedSalesmen.length - 1];
+
+    const tierMeta: Record<string, { label: string; minAov: number; maxAov?: number }> = {
+      platinum: { label: 'Platinum', minAov: 12000 },
+      gold: { label: 'Gold', minAov: 8000 },
+      silver: { label: 'Silver', minAov: 5000 },
+      bronze: { label: 'Bronze', minAov: 0 }
+    };
+    const retailerHealth = {
+      totalRetailers: 0,
+      tiers: [
+        { tier: 'platinum', label: tierMeta.platinum.label, count: 0, dormantCount: 0 },
+        { tier: 'gold', label: tierMeta.gold.label, count: 0, dormantCount: 0 },
+        { tier: 'silver', label: tierMeta.silver.label, count: 0, dormantCount: 0 },
+        { tier: 'bronze', label: tierMeta.bronze.label, count: 0, dormantCount: 0 }
+      ]
+    };
+    for (const item of Array.from(currentMetricMap.values()).filter((entry) => entry.entityType === 'retailer')) {
+      const aov = Number(item.metrics.aov || 0);
+      const dormancy = Number(item.metrics.dormancy_days || 0);
+      const tier =
+        aov >= tierMeta.platinum.minAov
+          ? 'platinum'
+          : aov >= tierMeta.gold.minAov
+            ? 'gold'
+            : aov >= tierMeta.silver.minAov
+              ? 'silver'
+              : 'bronze';
+      const summaryTier = retailerHealth.tiers.find((entry) => entry.tier === tier);
+      retailerHealth.totalRetailers += 1;
+      if (summaryTier) {
+        summaryTier.count += 1;
+        if (dormancy > 14) {
+          summaryTier.dormantCount += 1;
+        }
+      }
+    }
+    const totalRetailerOutstanding = Array.from(currentMetricMap.values())
+      .filter((entry) => entry.entityType === 'retailer')
+      .reduce((sum, entry) => sum + Number(entry.metrics.outstanding || 0), 0);
+
+    const metricLabels: Record<string, string> = {
+      revenue_mtd: 'Revenue',
+      collection_mtd: 'Collection',
+      coverage_pct: 'Coverage',
+      beat_adherence_pct: 'Adherence',
+      aov: 'AOV',
+      outstanding: 'Outstanding',
+      units_mtd: 'Units',
+      penetration_pct: 'Penetration',
+      orders_mtd: 'Orders',
+      realization_pct: 'Realization'
+    };
+    const metricFormatters: Record<string, (value: number) => string> = {
+      revenue_mtd: (value) => this.formatBriefingCurrency(value),
+      collection_mtd: (value) => this.formatBriefingCurrency(value),
+      coverage_pct: (value) => `${Number(value || 0).toFixed(1)}%`,
+      beat_adherence_pct: (value) => `${Number(value || 0).toFixed(1)}%`,
+      aov: (value) => this.formatBriefingCurrency(value),
+      outstanding: (value) => this.formatBriefingCurrency(value),
+      units_mtd: (value) => Math.round(Number(value || 0)).toLocaleString('en-IN'),
+      penetration_pct: (value) => `${Number(value || 0).toFixed(1)}%`,
+      orders_mtd: (value) => Math.round(Number(value || 0)).toLocaleString('en-IN'),
+      realization_pct: (value) => `${Number(value || 0).toFixed(1)}%`
+    };
+    const deltaMetricsByEntityType: Record<string, string[]> = {
+      salesman: ['revenue_mtd', 'collection_mtd', 'coverage_pct', 'beat_adherence_pct'],
+      retailer: ['aov', 'outstanding'],
+      sku: ['revenue_mtd', 'units_mtd', 'penetration_pct'],
+      distributor: ['revenue_mtd'],
+      beat: ['revenue_mtd', 'realization_pct']
+    };
+    const whatChangedEntries: Array<Record<string, any>> = [];
+    for (const currentEntry of Array.from(currentMetricMap.values())) {
+      const previousEntry = previousMetricMap.get(`${currentEntry.entityType}:${currentEntry.entityId}`);
+      if (!previousEntry) {
+        continue;
+      }
+      const metrics = deltaMetricsByEntityType[currentEntry.entityType] || [];
+      for (const metricKey of metrics) {
+        const currentValue = Number(currentEntry.metrics[metricKey] || 0);
+        const previousValue = Number(previousEntry.metrics[metricKey] || 0);
+        const delta = currentValue - previousValue;
+        const deltaPercent = previousValue !== 0 ? (delta * 100) / previousValue : currentValue !== 0 ? 100 : 0;
+        const roundedDeltaPercent = Math.round(deltaPercent * 10) / 10;
+        const direction = Math.abs(roundedDeltaPercent) < 2 ? 'flat' : delta > 0 ? 'up' : 'down';
+        const absPct = Math.abs(roundedDeltaPercent);
+        const significance = absPct >= 15 ? 'high' : absPct >= 8 ? 'medium' : 'low';
+        whatChangedEntries.push({
+          id: `${currentEntry.entityType}:${currentEntry.entityId}:${metricKey}`,
+          entityType: currentEntry.entityType,
+          entityId: currentEntry.entityId,
+          name: currentEntry.entityName,
+          metric: metricKey,
+          metricLabel: metricLabels[metricKey] || metricKey,
+          currentValue,
+          previousValue,
+          formattedCurrent: (metricFormatters[metricKey] || ((value) => String(value)))(currentValue),
+          formattedPrevious: (metricFormatters[metricKey] || ((value) => String(value)))(previousValue),
+          direction,
+          significance,
+          deltaPercent: roundedDeltaPercent,
+          drillPath: this.buildExploreDrillPath(currentEntry.entityType)
+        });
+      }
+    }
+    const significanceRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    const sortedChanges = whatChangedEntries
+      .filter((entry) => entry.direction !== 'flat')
+      .sort((left, right) => {
+        const significanceDiff = significanceRank[right.significance] - significanceRank[left.significance];
+        if (significanceDiff !== 0) {
+          return significanceDiff;
+        }
+        return Math.abs(right.deltaPercent) - Math.abs(left.deltaPercent);
+      });
+    const salesmanRevenueChanges = sortedChanges.filter(
+      (entry) => entry.entityType === 'salesman' && entry.metric === 'revenue_mtd'
+    );
+    const skuRevenueChanges = sortedChanges.filter((entry) => entry.entityType === 'sku' && entry.metric === 'revenue_mtd');
+    const topImprover = salesmanRevenueChanges.find((entry) => entry.direction === 'up');
+    const topDecliner = salesmanRevenueChanges.find((entry) => entry.direction === 'down');
+    const topSkuUp = skuRevenueChanges.find((entry) => entry.direction === 'up');
+    const topSkuDown = skuRevenueChanges.find((entry) => entry.direction === 'down');
+    const changeHighlights = [
+      topImprover
+        ? {
+            id: `salesman-up-${topImprover.entityId}`,
+            text: `${topImprover.name} revenue up ${Math.abs(topImprover.deltaPercent)}% vs last month (${topImprover.formattedPrevious} -> ${topImprover.formattedCurrent})`,
+            severity: 'positive',
+            drillPath: topImprover.drillPath
+          }
+        : null,
+      topDecliner
+        ? {
+            id: `salesman-down-${topDecliner.entityId}`,
+            text: `${topDecliner.name} revenue down ${Math.abs(topDecliner.deltaPercent)}% vs last month — needs attention`,
+            severity: 'negative',
+            drillPath: topDecliner.drillPath
+          }
+        : null,
+      topSkuUp
+        ? {
+            id: `sku-up-${topSkuUp.entityId}`,
+            text: `${topSkuUp.name} picking up momentum: +${Math.abs(topSkuUp.deltaPercent)}% MoM`,
+            severity: 'positive',
+            drillPath: topSkuUp.drillPath
+          }
+        : null,
+      topSkuDown
+        ? {
+            id: `sku-down-${topSkuDown.entityId}`,
+            text: `${topSkuDown.name} declining ${Math.abs(topSkuDown.deltaPercent)}% MoM — investigate distribution`,
+            severity: 'negative',
+            drillPath: topSkuDown.drillPath
+          }
+        : null
+    ].filter(Boolean);
+
+    const anomalyItems = signals.map((signal: any) => ({
+      id: signal.id,
+      key: signal.signal_key,
+      sourceKey: signal.source_key || this.buildSignalSourceKey(String(signal.entity_type), String(signal.entity_id || ''), String(signal.signal_key)),
+      actionState: signal.action_state || 'new',
+      severity: signal.severity,
+      entityType: signal.entity_type,
+      entityId: signal.entity_id ? String(signal.entity_id) : null,
+      entityName: signal.entity_name || null,
+      label: signal.headline,
+      detail: signal.description || '',
+      drillPath: this.buildExploreDrillPath(signal.entity_type)
+    }));
+    const attentionItems = anomalyItems.filter((item: any) => item.severity === 'critical' || item.severity === 'warning').slice(0, 3);
     const latestDateParts = getDateParts(latestDate);
 
     return {
       period: {
         label: 'MTD',
+        periodLabel: new Date(`${latestDate}T00:00:00.000Z`).toLocaleDateString('en-IN', {
+          month: 'short',
+          year: 'numeric',
+          timeZone: 'UTC'
+        }),
+        quarterLabel: this.getFiscalQuarterLabel(latestDate),
+        dateLabel: this.formatBriefingDateLabel(latestDate),
         dayElapsed: latestDateParts.day,
         daysInPeriod: latestDateParts.daysInMonth,
-        quarter: `Q${latestDateParts.quarter}`
+        quarter: this.getFiscalQuarterLabel(latestDate)
       },
       summarySection: {
         metricCards: [
           {
             key: 'revenue',
-            title: 'GMV',
-            value: Number(summaryMap.gmv || 0).toLocaleString('en-IN'),
+            title: 'Revenue MTD',
+            value: this.formatBriefingCurrency(Number(summaryMap.gmv || 0)),
             subtitle: 'Gross merchandise value',
             note: `${Number(summaryMap.gmv || 0).toFixed(0)}`,
             accent: '#4463ea'
           },
           {
             key: 'collection',
-            title: 'Collections',
-            value: Number(summaryMap.collections || 0).toLocaleString('en-IN'),
+            title: 'Collection',
+            value: this.formatBriefingCurrency(Number(summaryMap.collections || 0)),
             subtitle: 'Cashflow realized',
             note: `${Number(summaryMap.collections || 0).toFixed(0)}`,
             accent: '#0f9d58'
@@ -3216,12 +3713,12 @@ export class SupeV1Service {
             accent: '#f59e0b'
           },
           {
-            key: 'orders',
-            title: 'Orders',
-            value: Number(summaryMap.orders || 0).toLocaleString('en-IN'),
-            subtitle: 'Orders in period',
-            note: `${Number(summaryMap.orders || 0).toFixed(0)}`,
-            accent: '#1d4ed8'
+            key: 'outstanding',
+            title: 'Outstanding',
+            value: this.formatBriefingCurrency(totalRetailerOutstanding),
+            subtitle: `Across ${retailerHealth.totalRetailers} retailers`,
+            note: `${Math.round(totalRetailerOutstanding).toLocaleString('en-IN')}`,
+            accent: '#d97706'
           }
         ],
         goals,
@@ -3295,7 +3792,73 @@ export class SupeV1Service {
           }
         ]
       },
-      intelligence: signals
+      intelligence: signals,
+      briefing: {
+        attention: attentionItems,
+        team: {
+          totalSalesmen,
+          onTarget,
+          atRisk,
+          behind,
+          topPerformer: {
+            name: topSalesman?.entityName || '-',
+            revenue: this.formatBriefingCurrency(Number(topSalesman?.metrics?.revenue_mtd || 0)),
+            pct:
+              targetRevenue > 0
+                ? Math.round((Number(topSalesman?.metrics?.revenue_mtd || 0) * 100) / targetRevenue)
+                : 0
+          },
+          bottomPerformer: {
+            name: bottomSalesman?.entityName || '-',
+            revenue: this.formatBriefingCurrency(Number(bottomSalesman?.metrics?.revenue_mtd || 0)),
+            pct:
+              targetRevenue > 0
+                ? Math.round((Number(bottomSalesman?.metrics?.revenue_mtd || 0) * 100) / targetRevenue)
+                : 0
+          }
+        },
+        whatChanged: {
+          period: {
+            current: `${new Date(`${latestDate}T00:00:00.000Z`).toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`,
+            previous: previousSnapshotDate
+              ? `${new Date(`${previousSnapshotDate}T00:00:00.000Z`).toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`
+              : '-'
+          },
+          improvingCount: whatChangedEntries.filter((entry) => entry.direction === 'up').length,
+          decliningCount: whatChangedEntries.filter((entry) => entry.direction === 'down').length,
+          flatCount: whatChangedEntries.filter((entry) => entry.direction === 'flat').length,
+          highlights: changeHighlights,
+          bigMovers: sortedChanges.slice(0, 6).map((entry) => ({
+            id: entry.id,
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            name: entry.name,
+            metric: entry.metric,
+            metricLabel: entry.metricLabel,
+            direction: entry.direction,
+            deltaPercent: entry.deltaPercent,
+            drillPath: entry.drillPath
+          }))
+        },
+        retailerHealth,
+        goalsPreview: {
+          count: goals.length,
+          items: goals.slice(0, 3).map((goal: any) => ({
+            id: goal.id,
+            name: goal.name,
+            progressPercent: Number(goal.value || 0),
+            status: goal.status,
+            statusColor: goal.statusColor
+          }))
+        },
+        activeActions: actionDashboard,
+        anomalies: {
+          criticalCount: anomalyItems.filter((item: any) => item.severity === 'critical').length,
+          warningCount: anomalyItems.filter((item: any) => item.severity === 'warning').length,
+          totalCount: anomalyItems.length,
+          items: anomalyItems
+        }
+      }
     };
   }
 
@@ -3306,121 +3869,507 @@ export class SupeV1Service {
       return { data: [], meta: { page: 1, limit: 0, total: 0, totalPages: 0 } };
     }
 
-    const metricSets: Record<string, string[]> = {
-      salesman: ['revenue_mtd', 'collection_mtd', 'orders_mtd', 'coverage_pct', 'beat_adherence_pct', 'outstanding', 'mtd_outstanding'],
-      retailer: ['revenue_mtd', 'orders_mtd', 'aov', 'outstanding', 'mtd_outstanding', 'dormancy_days'],
-      beat: ['revenue_mtd', 'coverage_pct', 'realization_pct', 'visits_mtd', 'ebv', 'outstanding', 'mtd_outstanding'],
-      sku: ['revenue_mtd', 'units_mtd', 'penetration_pct', 'growth_pct', 'outlets_mtd'],
-      distributor: ['revenue_mtd', 'orders_mtd', 'outstanding', 'mtd_outstanding', 'fulfilment_pct', 'damage_pct'],
-      geography: ['revenue_mtd', 'collection_mtd', 'orders_mtd', 'coverage_pct']
+    const dateWindow = (await this.resolveInsightDateWindow(tenantId, query?.timeRange)) || {
+      startDate: startOfMonth(snapshotDate),
+      endDate: snapshotDate
     };
-    const metrics = metricSets[entityType] || ['revenue_mtd'];
-
-    const rows = await this.db.query(
-      `
-      select
-        entity_id, max(entity_name) as entity_name, max(zone) as zone, max(region) as region, max(area) as area,
-        ${metrics.map((metric, index) => `max(case when metric_key = '${metric}' then metric_value end) as m_${index}`).join(',')}
-      from entity_metric_snapshots
-      where tenant_id = $1
-        and entity_type = $2
-        and snapshot_date = $3::date
-      group by entity_id
-      order by max(entity_name) asc
-      `,
-      [tenantId, entityType, snapshotDate]
+    const previousSnapshotDate = await this.resolveLatestSnapshotOnOrBefore(
+      tenantId,
+      this.previousComparableMonthDate(snapshotDate)
     );
 
-    const mapped = rows.map((row: any) => {
-      const map: Record<string, unknown> = {
+    let mapped: any[] = [];
+
+    if (entityType === 'salesman') {
+      const rows = await this.db.query(
+        `
+        with current_metrics as (
+          select
+            entity_id,
+            max(case when metric_key = 'revenue_mtd' then metric_value end) as revenue_mtd,
+            max(case when metric_key = 'collection_mtd' then metric_value end) as collection_mtd,
+            max(case when metric_key = 'orders_mtd' then metric_value end) as orders_mtd,
+            max(case when metric_key = 'coverage_pct' then metric_value end) as coverage_pct,
+            max(case when metric_key = 'beat_adherence_pct' then metric_value end) as beat_adherence_pct,
+            max(case when metric_key = 'outstanding' then metric_value end) as outstanding
+          from entity_metric_snapshots
+          where tenant_id = $1 and entity_type = 'salesman' and snapshot_date = $2::date
+          group by entity_id
+        ),
+        previous_metrics as (
+          select
+            entity_id,
+            max(case when metric_key = 'revenue_mtd' then metric_value end) as previous_revenue_mtd,
+            max(case when metric_key = 'collection_mtd' then metric_value end) as previous_collection_mtd
+          from entity_metric_snapshots
+          where tenant_id = $1 and entity_type = 'salesman' and snapshot_date = $3::date
+          group by entity_id
+        ),
+        current_orders as (
+          select
+            salesman_id,
+            count(distinct outlet_id) as outlets_visited,
+            max(coalesce(order_punched_at, order_sale_date::timestamp)) as last_active_at
+          from sales_orders
+          where tenant_id = $1
+            and order_sale_date between $4::date and $5::date
+            and salesman_id is not null
+          group by salesman_id
+        ),
+        current_outlets as (
+          select salesman_id, count(distinct outlet_id) as outlets_total
+          from tenant_outlets
+          where tenant_id = $1 and active = true and salesman_id is not null
+          group by salesman_id
+        ),
+        route_candidates as (
+          select *
+          from (
+            select
+              to2.salesman_id,
+              coalesce(b.beat_name, '-') as beat_name,
+              row_number() over (
+                partition by to2.salesman_id
+                order by count(*) desc, coalesce(b.beat_name, '-') asc
+              ) as rn
+            from tenant_outlets to2
+            left join beats b on b.id = to2.beat_id
+            where to2.tenant_id = $1 and to2.active = true and to2.salesman_id is not null
+            group by to2.salesman_id, coalesce(b.beat_name, '-')
+          ) ranked
+          where rn = 1
+        ),
+        manager_matches as (
+          select *
+          from (
+            select
+              s.id as salesman_id,
+              mgr.full_name as manager_name,
+              row_number() over (
+                partition by s.id
+                order by
+                  case when s.employee_code is not null and p.person_code = s.employee_code then 0 else 1 end,
+                  mgr.full_name asc nulls last
+              ) as rn
+            from salesmen s
+            left join people p
+              on p.tenant_id = s.tenant_id
+             and p.active = true
+             and (
+               (s.employee_code is not null and p.person_code = s.employee_code)
+               or lower(p.full_name) = lower(s.salesman_name)
+             )
+            left join people mgr on mgr.id = p.manager_person_id
+            where s.tenant_id = $1 and s.active = true
+          ) ranked
+          where rn = 1
+        )
+        select
+          s.id::text as salesman_id,
+          s.salesman_name,
+          coalesce(s.zone, d.zone, '-') as zone,
+          coalesce(s.region, d.region, '-') as region,
+          coalesce(s.area, d.area, '-') as area,
+          coalesce(cm.revenue_mtd, 0) as revenue_mtd,
+          coalesce(cm.collection_mtd, 0) as collection_mtd,
+          coalesce(cm.orders_mtd, 0) as orders_mtd,
+          coalesce(cm.coverage_pct, 0) as coverage_pct,
+          coalesce(cm.beat_adherence_pct, 0) as beat_adherence_pct,
+          coalesce(cm.outstanding, 0) as outstanding,
+          coalesce(pm.previous_revenue_mtd, 0) as previous_revenue_mtd,
+          coalesce(pm.previous_collection_mtd, 0) as previous_collection_mtd,
+          coalesce(co.outlets_visited, 0) as outlets_visited,
+          coalesce(ct.outlets_total, 0) as outlets_total,
+          coalesce(rc.beat_name, '-') as route_name,
+          coalesce(mm.manager_name, '-') as manager_name,
+          coalesce(d.distributor_name, '-') as distributor_name,
+          co.last_active_at
+        from salesmen s
+        left join distributors d on d.id = s.distributor_id
+        left join current_metrics cm on cm.entity_id = s.id::text
+        left join previous_metrics pm on pm.entity_id = s.id::text
+        left join current_orders co on co.salesman_id = s.id
+        left join current_outlets ct on ct.salesman_id = s.id
+        left join route_candidates rc on rc.salesman_id = s.id
+        left join manager_matches mm on mm.salesman_id = s.id
+        where s.tenant_id = $1 and s.active = true
+        order by s.salesman_name asc
+        `,
+        [tenantId, snapshotDate, previousSnapshotDate, dateWindow.startDate, dateWindow.endDate]
+      );
+
+      mapped = rows.map((row: any) => ({
+        id: String(row.salesman_id),
+        name: row.salesman_name,
+        salesmanId: String(row.salesman_id),
+        zone: row.zone,
+        region: row.region,
+        area: row.area,
+        revenueMTD: Number(row.revenue_mtd || 0),
+        collectionMTD: Number(row.collection_mtd || 0),
+        ordersMTD: Number(row.orders_mtd || 0),
+        previousRevenueMTD: Number(row.previous_revenue_mtd || 0),
+        previousCollectionMTD: Number(row.previous_collection_mtd || 0),
+        outletsVisited: Number(row.outlets_visited || 0),
+        outletsTotal: Number(row.outlets_total || 0),
+        beatAdherence: Number(row.beat_adherence_pct || 0),
+        coveragePct: Number(row.coverage_pct || 0),
+        outstanding: Number(row.outstanding || 0),
+        route: row.route_name || '-',
+        manager: row.manager_name || '-',
+        distributor: row.distributor_name || '-',
+        lastActive: row.last_active_at
+      }));
+    } else if (entityType === 'retailer') {
+      const rows = await this.db.query(
+        `
+        with current_metrics as (
+          select
+            entity_id,
+            max(case when metric_key = 'revenue_mtd' then metric_value end) as revenue_mtd,
+            max(case when metric_key = 'orders_mtd' then metric_value end) as orders_mtd,
+            max(case when metric_key = 'aov' then metric_value end) as aov,
+            max(case when metric_key = 'outstanding' then metric_value end) as outstanding,
+            max(case when metric_key = 'dormancy_days' then metric_value end) as dormancy_days
+          from entity_metric_snapshots
+          where tenant_id = $1 and entity_type = 'retailer' and snapshot_date = $2::date
+          group by entity_id
+        ),
+        order_history as (
+          select
+            so.tenant_outlet_id,
+            count(*) as total_orders,
+            min(so.order_sale_date) as first_order_date,
+            max(so.order_sale_date) as last_order_date
+          from sales_orders so
+          where so.tenant_id = $1
+          group by so.tenant_outlet_id
+        ),
+        latest_orders as (
+          select *
+          from (
+            select
+              so.tenant_outlet_id,
+              so.order_sale_date,
+              so.net_amount,
+              row_number() over (
+                partition by so.tenant_outlet_id
+                order by so.order_sale_date desc, so.id desc
+              ) as rn
+            from sales_orders so
+            where so.tenant_id = $1
+          ) ranked
+          where rn = 1
+        )
+        select
+          o.id::text as retailer_id,
+          o.outlet_name as retailer_name,
+          coalesce(o.zone, d.zone, '-') as zone,
+          coalesce(o.region, d.region, '-') as region,
+          coalesce(o.area, d.area, '-') as area,
+          coalesce(cm.revenue_mtd, 0) as revenue_mtd,
+          coalesce(cm.orders_mtd, 0) as orders_mtd,
+          coalesce(cm.aov, 0) as aov,
+          coalesce(cm.outstanding, 0) as outstanding,
+          coalesce(cm.dormancy_days, 0) as dormancy_days,
+          lo.order_sale_date as last_order_date,
+          coalesce(lo.net_amount, 0) as last_bill_value,
+          coalesce(oh.total_orders, 0) as total_orders,
+          oh.first_order_date,
+          oh.last_order_date as last_order_date_all,
+          coalesce(s.salesman_name, '-') as salesman_name,
+          coalesce(d.distributor_name, '-') as distributor_name
+        from tenant_outlets to2
+        join outlets o on o.id = to2.outlet_id
+        left join salesmen s on s.id = to2.salesman_id
+        left join distributors d on d.id = to2.distributor_id
+        left join current_metrics cm on cm.entity_id = o.id::text
+        left join latest_orders lo on lo.tenant_outlet_id = to2.id
+        left join order_history oh on oh.tenant_outlet_id = to2.id
+        where to2.tenant_id = $1 and to2.active = true
+        order by o.outlet_name asc
+        `,
+        [tenantId, snapshotDate]
+      );
+
+      mapped = rows.map((row: any) => {
+        const totalOrders = Number(row.total_orders || 0);
+        const firstOrderDate = toDateOnly(row.first_order_date);
+        const lastOrderDateAll = toDateOnly(row.last_order_date_all);
+        const repeatOrderFrequency =
+          totalOrders > 1 && firstOrderDate && lastOrderDateAll
+            ? daysBetweenDates(firstOrderDate, lastOrderDateAll) / Math.max(totalOrders - 1, 1)
+            : 0;
+        return {
+          id: String(row.retailer_id),
+          name: row.retailer_name,
+          retailerId: String(row.retailer_id),
+          zone: row.zone,
+          region: row.region,
+          area: row.area,
+          revenueMTD: Number(row.revenue_mtd || 0),
+          ordersMTD: Number(row.orders_mtd || 0),
+          aov: Number(row.aov || 0),
+          outstanding: Number(row.outstanding || 0),
+          dormancyDays: Number(row.dormancy_days || 0),
+          lastOrderDate: toDateOnly(row.last_order_date),
+          lastBillValue: Number(row.last_bill_value || 0),
+          repeatOrderFrequency,
+          salesman: row.salesman_name || '-',
+          distributor: row.distributor_name || '-'
+        };
+      });
+    } else if (entityType === 'beat') {
+      const rows = await this.db.query(
+        `
+        with current_metrics as (
+          select
+            entity_id,
+            max(case when metric_key = 'revenue_mtd' then metric_value end) as revenue_mtd,
+            max(case when metric_key = 'coverage_pct' then metric_value end) as coverage_pct,
+            max(case when metric_key = 'realization_pct' then metric_value end) as realization_pct,
+            max(case when metric_key = 'visits_mtd' then metric_value end) as visits_mtd,
+            max(case when metric_key = 'ebv' then metric_value end) as ebv
+          from entity_metric_snapshots
+          where tenant_id = $1 and entity_type = 'beat' and snapshot_date = $2::date
+          group by entity_id
+        ),
+        active_outlets as (
+          select beat_id, count(distinct outlet_id) as active_outlets
+          from sales_orders
+          where tenant_id = $1
+            and order_sale_date between $3::date and $4::date
+            and beat_id is not null
+          group by beat_id
+        ),
+        total_outlets as (
+          select beat_id, count(distinct outlet_id) as total_outlets
+          from beat_outlets
+          where tenant_id = $1 and active = true and beat_id is not null
+          group by beat_id
+        ),
+        dominant_salesman as (
+          select *
+          from (
+            select
+              so.beat_id,
+              s.salesman_name,
+              row_number() over (
+                partition by so.beat_id
+                order by count(*) desc, s.salesman_name asc
+              ) as rn
+            from sales_orders so
+            join salesmen s on s.id = so.salesman_id
+            where so.tenant_id = $1
+              and so.order_sale_date between $3::date and $4::date
+              and so.beat_id is not null
+              and so.salesman_id is not null
+            group by so.beat_id, s.salesman_name
+          ) ranked
+          where rn = 1
+        )
+        select
+          b.id::text as beat_id,
+          b.beat_name,
+          coalesce(b.zone, d.zone, '-') as zone,
+          coalesce(b.region, d.region, '-') as region,
+          coalesce(b.area, d.area, '-') as area,
+          coalesce(cm.revenue_mtd, 0) as revenue_mtd,
+          coalesce(cm.coverage_pct, 0) as coverage_pct,
+          coalesce(cm.realization_pct, 0) as realization_pct,
+          coalesce(cm.visits_mtd, 0) as visits_mtd,
+          coalesce(cm.ebv, 0) as ebv,
+          coalesce(ao.active_outlets, 0) as active_outlets,
+          coalesce(to2.total_outlets, 0) as total_outlets,
+          coalesce(ds.salesman_name, '-') as salesman_name,
+          coalesce(d.distributor_name, '-') as distributor_name
+        from beats b
+        left join distributors d on d.id = b.distributor_id
+        left join current_metrics cm on cm.entity_id = b.id::text
+        left join active_outlets ao on ao.beat_id = b.id
+        left join total_outlets to2 on to2.beat_id = b.id
+        left join dominant_salesman ds on ds.beat_id = b.id
+        where b.tenant_id = $1 and b.active = true
+        order by b.beat_name asc
+        `,
+        [tenantId, snapshotDate, dateWindow.startDate, dateWindow.endDate]
+      );
+
+      mapped = rows.map((row: any) => ({
+        id: String(row.beat_id),
+        name: row.beat_name,
+        beatId: String(row.beat_id),
+        beatName: row.beat_name,
+        zone: row.zone,
+        region: row.region,
+        area: row.area,
+        revenueMTD: Number(row.revenue_mtd || 0),
+        ebv: Number(row.ebv || 0),
+        visitsMTD: Number(row.visits_mtd || 0),
+        activeOutlets: Number(row.active_outlets || 0),
+        totalOutlets: Number(row.total_outlets || 0),
+        coveragePct: Number(row.coverage_pct || 0),
+        realizationPct: Number(row.realization_pct || 0),
+        salesman: row.salesman_name || '-',
+        distributor: row.distributor_name || '-'
+      }));
+    } else if (entityType === 'sku') {
+      const rows = await this.db.query(
+        `
+        with current_metrics as (
+          select
+            entity_id,
+            max(case when metric_key = 'revenue_mtd' then metric_value end) as revenue_mtd,
+            max(case when metric_key = 'units_mtd' then metric_value end) as units_mtd,
+            max(case when metric_key = 'outlets_mtd' then metric_value end) as outlets_mtd,
+            max(case when metric_key = 'penetration_pct' then metric_value end) as penetration_pct,
+            max(case when metric_key = 'growth_pct' then metric_value end) as growth_pct
+          from entity_metric_snapshots
+          where tenant_id = $1 and entity_type = 'sku' and snapshot_date = $2::date
+          group by entity_id
+        )
+        select
+          s.id::text as sku_id,
+          s.name as sku_name,
+          coalesce(b.brand_name, '-') as brand_name,
+          coalesce(max(ems.zone), '-') as zone,
+          coalesce(max(ems.region), '-') as region,
+          coalesce(max(ems.area), '-') as area,
+          coalesce(cm.revenue_mtd, 0) as revenue_mtd,
+          coalesce(cm.units_mtd, 0) as units_mtd,
+          coalesce(cm.outlets_mtd, 0) as outlets_mtd,
+          coalesce(cm.penetration_pct, 0) as penetration_pct,
+          coalesce(cm.growth_pct, 0) as growth_pct
+        from skus s
+        left join brands b on b.id = s.brand_id
+        left join current_metrics cm on cm.entity_id = s.id::text
+        left join entity_metric_snapshots ems
+          on ems.tenant_id = $1
+         and ems.entity_type = 'sku'
+         and ems.entity_id = s.id::text
+         and ems.snapshot_date = $2::date
+        where s.tenant_id = $1 and s.active = true
+        group by s.id, s.name, b.brand_name, cm.revenue_mtd, cm.units_mtd, cm.outlets_mtd, cm.penetration_pct, cm.growth_pct
+        order by s.name asc
+        `,
+        [tenantId, snapshotDate]
+      );
+
+      mapped = rows.map((row: any) => ({
+        id: String(row.sku_id),
+        name: row.sku_name,
+        skuId: String(row.sku_id),
+        skuName: row.sku_name,
+        brand: row.brand_name || '-',
+        category: row.brand_name || '-',
+        zone: row.zone,
+        region: row.region,
+        area: row.area,
+        revenueMTD: Number(row.revenue_mtd || 0),
+        unitsMTD: Number(row.units_mtd || 0),
+        outletsMTD: Number(row.outlets_mtd || 0),
+        penetrationPct: Number(row.penetration_pct || 0),
+        growthPct: Number(row.growth_pct || 0)
+      }));
+    } else if (entityType === 'distributor') {
+      const rows = await this.db.query(
+        `
+        with current_metrics as (
+          select
+            entity_id,
+            max(case when metric_key = 'revenue_mtd' then metric_value end) as revenue_mtd,
+            max(case when metric_key = 'orders_mtd' then metric_value end) as orders_mtd,
+            max(case when metric_key = 'outstanding' then metric_value end) as outstanding,
+            max(case when metric_key = 'fulfilment_pct' then metric_value end) as fulfilment_pct,
+            max(case when metric_key = 'damage_pct' then metric_value end) as damage_pct
+          from entity_metric_snapshots
+          where tenant_id = $1 and entity_type = 'distributor' and snapshot_date = $2::date
+          group by entity_id
+        ),
+        active_salesmen as (
+          select distributor_id, count(*) as active_salesmen
+          from salesmen
+          where tenant_id = $1 and active = true and distributor_id is not null
+          group by distributor_id
+        ),
+        active_outlets as (
+          select distributor_id, count(distinct outlet_id) as active_outlets
+          from tenant_outlets
+          where tenant_id = $1 and active = true and distributor_id is not null
+          group by distributor_id
+        )
+        select
+          d.id::text as distributor_id,
+          d.distributor_name,
+          coalesce(d.zone, '-') as zone,
+          coalesce(d.region, '-') as region,
+          coalesce(d.area, '-') as area,
+          coalesce(cm.revenue_mtd, 0) as revenue_mtd,
+          coalesce(cm.orders_mtd, 0) as orders_mtd,
+          coalesce(cm.outstanding, 0) as outstanding,
+          coalesce(cm.fulfilment_pct, 0) as fulfilment_pct,
+          coalesce(cm.damage_pct, 0) as damage_pct,
+          coalesce(asl.active_salesmen, 0) as active_salesmen,
+          coalesce(ao.active_outlets, 0) as active_outlets
+        from distributors d
+        left join current_metrics cm on cm.entity_id = d.id::text
+        left join active_salesmen asl on asl.distributor_id = d.id
+        left join active_outlets ao on ao.distributor_id = d.id
+        where d.tenant_id = $1 and d.active = true
+        order by d.distributor_name asc
+        `,
+        [tenantId, snapshotDate]
+      );
+
+      mapped = rows.map((row: any) => ({
+        id: String(row.distributor_id),
+        name: row.distributor_name,
+        distributorId: String(row.distributor_id),
+        distributorName: row.distributor_name,
+        zone: row.zone,
+        region: row.region,
+        area: row.area,
+        revenueMTD: Number(row.revenue_mtd || 0),
+        ordersMTD: Number(row.orders_mtd || 0),
+        outstanding: Number(row.outstanding || 0),
+        fulfilmentPct: Number(row.fulfilment_pct || 0),
+        damagePct: Number(row.damage_pct || 0),
+        activeSalesmen: Number(row.active_salesmen || 0),
+        activeOutlets: Number(row.active_outlets || 0)
+      }));
+    } else {
+      const rows = await this.db.query(
+        `
+        select
+          entity_id,
+          max(entity_name) as entity_name,
+          max(zone) as zone,
+          max(region) as region,
+          max(area) as area,
+          max(case when metric_key = 'revenue_mtd' then metric_value end) as revenue_mtd,
+          max(case when metric_key = 'collection_mtd' then metric_value end) as collection_mtd,
+          max(case when metric_key = 'orders_mtd' then metric_value end) as orders_mtd,
+          max(case when metric_key = 'coverage_pct' then metric_value end) as coverage_pct
+        from entity_metric_snapshots
+        where tenant_id = $1 and entity_type = 'geography' and snapshot_date = $2::date
+        group by entity_id
+        order by max(entity_name) asc
+        `,
+        [tenantId, snapshotDate]
+      );
+
+      mapped = rows.map((row: any) => ({
         id: String(row.entity_id),
         name: row.entity_name,
         zone: row.zone,
         region: row.region,
-        area: row.area
-      };
-      metrics.forEach((metric, index) => {
-        map[metric] = Number(row[`m_${index}`] || 0);
-      });
-
-      if (entityType === 'salesman') {
-        return {
-          ...map,
-          salesmanId: map.id,
-          firstName: String(map.name || '').split(' ')[0] || map.name,
-          lastName: String(map.name || '').split(' ').slice(1).join(' '),
-          revenue: map.revenue_mtd,
-          collection: map.collection_mtd,
-          orders: map.orders_mtd,
-          coverage: map.coverage_pct,
-          beatAdherence: map.beat_adherence_pct,
-          outstanding: map.outstanding,
-          mtdOutstanding: map.mtd_outstanding
-        };
-      }
-      if (entityType === 'retailer') {
-        return {
-          ...map,
-          retailerId: map.id,
-          firstName: map.name,
-          lastName: '',
-          revenue: map.revenue_mtd,
-          orders: map.orders_mtd,
-          aov: map.aov,
-          outstanding: map.outstanding,
-          mtdOutstanding: map.mtd_outstanding,
-          dormancyDays: map.dormancy_days
-        };
-      }
-      if (entityType === 'beat') {
-        return {
-          ...map,
-          beatId: map.id,
-          beatName: map.name,
-          revenue: map.revenue_mtd,
-          coverage: map.coverage_pct,
-          realizationPct: map.realization_pct,
-          orders: map.visits_mtd,
-          ebv: map.ebv,
-          outstanding: map.outstanding,
-          mtdOutstanding: map.mtd_outstanding
-        };
-      }
-      if (entityType === 'sku') {
-        return {
-          ...map,
-          skuId: map.id,
-          skuName: map.name,
-          revenue: map.revenue_mtd,
-          qty: map.units_mtd,
-          penetration: map.penetration_pct,
-          growth: map.growth_pct
-        };
-      }
-      if (entityType === 'distributor') {
-        return {
-          ...map,
-          distributorId: map.id,
-          distributorName: map.name,
-          revenue: map.revenue_mtd,
-          orders: map.orders_mtd,
-          outstanding: map.outstanding,
-          mtdOutstanding: map.mtd_outstanding,
-          fulfilmentRate: map.fulfilment_pct,
-          damage: map.damage_pct
-        };
-      }
-      if (entityType === 'geography') {
-        return {
-          ...map,
-          revenue: map.revenue_mtd,
-          collection: map.collection_mtd,
-          orders: map.orders_mtd,
-          coverage: map.coverage_pct
-        };
-      }
-      return map;
-    });
+        area: row.area,
+        revenueMTD: Number(row.revenue_mtd || 0),
+        collectionMTD: Number(row.collection_mtd || 0),
+        ordersMTD: Number(row.orders_mtd || 0),
+        coveragePct: Number(row.coverage_pct || 0)
+      }));
+    }
 
     const limit = Number(query?.limit || 50);
     const page = Number(query?.page || 1);
@@ -3432,7 +4381,10 @@ export class SupeV1Service {
         page,
         limit,
         total: mapped.length,
-        totalPages: mapped.length ? Math.ceil(mapped.length / limit) : 1
+        totalPages: mapped.length ? Math.ceil(mapped.length / limit) : 1,
+        snapshotDate,
+        periodLabel: this.formatExplorePeriodLabel(snapshotDate),
+        dayCount: Math.max(1, daysBetweenDates(dateWindow.startDate, dateWindow.endDate) + 1)
       }
     };
   }
@@ -3609,12 +4561,46 @@ export class SupeV1Service {
       zone: string;
       thresholdValue: number;
       isEnabled?: boolean;
-    }>
+    }>,
+    replaceSignalDefinitionIds: number[] = []
   ) {
     const tenantId = await this.resolveTenantId(user);
+    const normalizedOverrides: Array<{
+      signalDefinitionId: number;
+      zone: string;
+      thresholdValue: number;
+      isEnabled?: boolean;
+    }> = [];
+
     for (const item of overrides) {
       const signalDefinitionId = await this.resolveSignalDefinitionId(tenantId, item);
-      const zone = this.normalizeZone(item.zone);
+      normalizedOverrides.push({
+        signalDefinitionId,
+        zone: this.normalizeZone(item.zone),
+        thresholdValue: item.thresholdValue,
+        isEnabled: item.isEnabled
+      });
+    }
+
+    const definitionIdsToReplace = Array.from(
+      new Set(
+        [...replaceSignalDefinitionIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0), ...normalizedOverrides.map((item) => item.signalDefinitionId)]
+      )
+    );
+
+    if (definitionIdsToReplace.length) {
+      await this.db.query(
+        `
+          delete from tenant_signal_thresholds
+          where tenant_id = $1
+            and zone <> 'NATIONAL'
+            and signal_definition_id = any($2::bigint[])
+        `,
+        [tenantId, definitionIdsToReplace]
+      );
+    }
+
+    for (const item of normalizedOverrides) {
       await this.db.query(
         `
           insert into tenant_signal_thresholds (tenant_id, signal_definition_id, zone, threshold_value, is_enabled)
@@ -3622,7 +4608,7 @@ export class SupeV1Service {
           on conflict (tenant_id, signal_definition_id, zone)
           do update set threshold_value = excluded.threshold_value, is_enabled = excluded.is_enabled, updated_at = now()
         `,
-        [tenantId, signalDefinitionId, zone, item.thresholdValue, item.isEnabled ?? true]
+        [tenantId, item.signalDefinitionId, item.zone, item.thresholdValue, item.isEnabled ?? true]
       );
     }
   }
@@ -3670,6 +4656,516 @@ export class SupeV1Service {
       throw error;
     } finally {
       await runner.release();
+    }
+  }
+
+  async getActionsDashboard(user?: IAuthUser) {
+    const tenantId = await this.resolveTenantId(user);
+    return this.fetchActionDashboardInternal(tenantId);
+  }
+
+  async listActions(user?: IAuthUser, filters?: { status?: string }) {
+    const tenantId = await this.resolveTenantId(user);
+    const params: any[] = [tenantId];
+    const whereParts = ['a.tenant_id = $1'];
+    if (filters?.status) {
+      params.push(filters.status);
+      whereParts.push(`a.status = $${params.length}`);
+    }
+
+    const rows = await this.db.query(
+      `
+      select
+        a.*,
+        count(distinct at.id)::int as target_count
+      from actions a
+      left join action_targets at on at.action_id = a.id
+      where ${whereParts.join(' and ')}
+      group by a.id
+      order by a.updated_at desc
+      `,
+      params
+    );
+    return {
+      items: rows.map((row: any) => ({
+        id: Number(row.id),
+        type: row.type,
+        typeLabel: this.mapActionTypeLabel(row.type),
+        title: row.title,
+        status: row.status,
+        sourceKind: row.source_kind,
+        sourceKey: row.source_key,
+        sourceEntityType: row.source_entity_type,
+        sourceEntityId: row.source_entity_id,
+        sourceEntityName: row.source_entity_name,
+        audienceType: row.audience_type,
+        targetCount: Number(row.target_count || 0),
+        payload: row.payload || {},
+        deliverySummary: row.delivery_summary || {},
+        deliverySummaryLabel: this.summarizeDeliverySummary(row.delivery_summary, Number(row.target_count || 0)),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }))
+    };
+  }
+
+  async getActionById(user: IAuthUser | undefined, actionId: number) {
+    const tenantId = await this.resolveTenantId(user);
+    const rows = await this.db.query(`select * from actions where tenant_id = $1 and id = $2 limit 1`, [tenantId, actionId]);
+    const action = rows[0];
+    if (!action) {
+      throw new Error('Action not found');
+    }
+    const targets = await this.db.query(`select * from action_targets where action_id = $1 order by id asc`, [actionId]);
+    const events = await this.db.query(
+      `select * from action_events where tenant_id = $1 and action_id = $2 order by created_at desc`,
+      [tenantId, actionId]
+    );
+    return {
+      id: Number(action.id),
+      type: action.type,
+      typeLabel: this.mapActionTypeLabel(action.type),
+      title: action.title,
+      status: action.status,
+      sourceKind: action.source_kind,
+      sourceKey: action.source_key,
+      sourceEntityType: action.source_entity_type,
+      sourceEntityId: action.source_entity_id,
+      sourceEntityName: action.source_entity_name,
+      audienceType: action.audience_type,
+      payload: action.payload || {},
+      deliverySummary: action.delivery_summary || {},
+      createdBy: action.created_by,
+      createdAt: action.created_at,
+      updatedAt: action.updated_at,
+      targets: targets.map((target: any) => ({
+        id: Number(target.id),
+        entityType: target.entity_type,
+        entityId: target.entity_id,
+        entityName: target.entity_name,
+        metadata: target.metadata || {}
+      })),
+      events: events.map((event: any) => ({
+        id: Number(event.id),
+        eventType: event.event_type,
+        label: event.label,
+        detail: event.detail,
+        payload: event.payload || {},
+        createdBy: event.created_by,
+        createdAt: event.created_at
+      }))
+    };
+  }
+
+  async createAction(
+    user: IAuthUser | undefined,
+    payload: {
+      type: string;
+      title: string;
+      status?: string;
+      sourceKind?: string;
+      sourceKey?: string | null;
+      sourceEntityType?: string | null;
+      sourceEntityId?: string | null;
+      sourceEntityName?: string | null;
+      audienceType?: string | null;
+      payload?: Record<string, unknown>;
+      targets?: Array<{ entityType: string; entityId: string; entityName?: string; metadata?: Record<string, unknown> }>;
+      initialTask?: {
+        assignee: string;
+        instruction: string;
+        deadline?: string | null;
+        entityType?: string | null;
+        entityId?: string | null;
+        entityName?: string | null;
+      };
+    }
+  ) {
+    const tenantId = await this.resolveTenantId(user);
+    const runner = this.db.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const inserted = await runner.query(
+        `
+        insert into actions (
+          tenant_id, type, title, status, source_kind, source_key, source_entity_type, source_entity_id, source_entity_name,
+          audience_type, payload, delivery_summary, created_by
+        )
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13)
+        returning id
+        `,
+        [
+          tenantId,
+          payload.type,
+          payload.title,
+          payload.status || 'draft',
+          payload.sourceKind || 'manual',
+          payload.sourceKey || null,
+          payload.sourceEntityType || null,
+          payload.sourceEntityId || null,
+          payload.sourceEntityName || null,
+          payload.audienceType || null,
+          JSON.stringify(payload.payload || {}),
+          JSON.stringify({ delivered: 0, responded: 0, targetCount: payload.targets?.length || 0 }),
+          user?.id || 'system'
+        ]
+      );
+      const actionId = Number(inserted[0]?.id);
+
+      for (const target of payload.targets || []) {
+        await runner.query(
+          `
+          insert into action_targets (action_id, entity_type, entity_id, entity_name, metadata)
+          values ($1,$2,$3,$4,$5::jsonb)
+          `,
+          [actionId, target.entityType, target.entityId, target.entityName || null, JSON.stringify(target.metadata || {})]
+        );
+      }
+
+      await runner.query(
+        `
+        insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+        values ($1,$2,'created',$3,$4,$5::jsonb,$6)
+        `,
+        [
+          tenantId,
+          actionId,
+          `Created ${this.mapActionTypeLabel(payload.type)}`,
+          payload.title,
+          JSON.stringify({ status: payload.status || 'draft', targetCount: payload.targets?.length || 0 }),
+          user?.id || 'system'
+        ]
+      );
+
+      if (payload.initialTask) {
+        await runner.query(
+          `
+          insert into action_tasks (
+            tenant_id, action_id, assignee, instruction, deadline, entity_type, entity_id, entity_name, status, created_by
+          )
+          values ($1,$2,$3,$4,$5::date,$6,$7,$8,'open',$9)
+          `,
+          [
+            tenantId,
+            actionId,
+            payload.initialTask.assignee,
+            payload.initialTask.instruction,
+            payload.initialTask.deadline || null,
+            payload.initialTask.entityType || null,
+            payload.initialTask.entityId || null,
+            payload.initialTask.entityName || null,
+            user?.id || 'system'
+          ]
+        );
+        await runner.query(
+          `
+          insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+          values ($1,$2,'assign',$3,$4,$5::jsonb,$6)
+          `,
+          [
+            tenantId,
+            actionId,
+            `Assigned task to ${payload.initialTask.assignee}`,
+            payload.initialTask.instruction,
+            JSON.stringify({ deadline: payload.initialTask.deadline || null }),
+            user?.id || 'system'
+          ]
+        );
+      }
+
+      if (payload.sourceKind === 'signal' && payload.sourceKey) {
+        await runner.query(`update entity_signals set action_state = 'actioned' where tenant_id = $1 and source_key = $2`, [
+          tenantId,
+          payload.sourceKey
+        ]);
+      }
+
+      await runner.commitTransaction();
+      return await this.getActionById(user, actionId);
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  async updateAction(
+    user: IAuthUser | undefined,
+    actionId: number,
+    payload: { title?: string; status?: string; payload?: Record<string, unknown> }
+  ) {
+    const tenantId = await this.resolveTenantId(user);
+    const existingRows = await this.db.query(`select * from actions where tenant_id = $1 and id = $2 limit 1`, [tenantId, actionId]);
+    const existing = existingRows[0];
+    if (!existing) {
+      throw new Error('Action not found');
+    }
+    const nextTitle = payload.title || existing.title;
+    const nextStatus = payload.status || existing.status;
+    const nextPayload = payload.payload ? { ...(existing.payload || {}), ...payload.payload } : existing.payload || {};
+
+    await this.db.query(
+      `
+      update actions
+      set title = $3, status = $4, payload = $5::jsonb, updated_at = now()
+      where tenant_id = $1 and id = $2
+      `,
+      [tenantId, actionId, nextTitle, nextStatus, JSON.stringify(nextPayload)]
+    );
+
+    if (payload.status && payload.status !== existing.status) {
+      await this.db.query(
+        `
+        insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+        values ($1,$2,'status_changed',$3,$4,$5::jsonb,$6)
+        `,
+        [
+          tenantId,
+          actionId,
+          `Marked ${payload.status}`,
+          nextTitle,
+          JSON.stringify({ previousStatus: existing.status, nextStatus: payload.status }),
+          user?.id || 'system'
+        ]
+      );
+    } else {
+      await this.db.query(
+        `
+        insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+        values ($1,$2,'updated',$3,$4,$5::jsonb,$6)
+        `,
+        [tenantId, actionId, 'Updated action', nextTitle, JSON.stringify({}), user?.id || 'system']
+      );
+    }
+
+    return this.getActionById(user, actionId);
+  }
+
+  async appendActionEvent(
+    user: IAuthUser | undefined,
+    actionId: number,
+    payload: {
+      eventType: string;
+      label: string;
+      detail?: string | null;
+      payload?: Record<string, unknown>;
+      task?: {
+        assignee: string;
+        instruction: string;
+        deadline?: string | null;
+        entityType?: string | null;
+        entityId?: string | null;
+        entityName?: string | null;
+      };
+    }
+  ) {
+    const tenantId = await this.resolveTenantId(user);
+    const rows = await this.db.query(`select id from actions where tenant_id = $1 and id = $2 limit 1`, [tenantId, actionId]);
+    if (!rows.length) {
+      throw new Error('Action not found');
+    }
+    const inserted = await this.db.query(
+      `
+      insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+      values ($1,$2,$3,$4,$5,$6::jsonb,$7)
+      returning id, created_at
+      `,
+      [tenantId, actionId, payload.eventType, payload.label, payload.detail || null, JSON.stringify(payload.payload || {}), user?.id || 'system']
+    );
+
+    if (payload.task) {
+      await this.createTask(user, { ...payload.task, actionId });
+    }
+    await this.db.query(`update actions set updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, actionId]);
+
+    return {
+      id: Number(inserted[0]?.id),
+      eventType: payload.eventType,
+      label: payload.label,
+      detail: payload.detail || null,
+      createdAt: inserted[0]?.created_at
+    };
+  }
+
+  async getActionLog(user?: IAuthUser) {
+    const tenantId = await this.resolveTenantId(user);
+    return this.fetchActionLogInternal(tenantId);
+  }
+
+  async listTasks(user?: IAuthUser) {
+    const tenantId = await this.resolveTenantId(user);
+    const rows = await this.db.query(`select * from action_tasks where tenant_id = $1 order by created_at desc`, [tenantId]);
+    return {
+      items: rows.map((task: any) => ({
+        id: Number(task.id),
+        actionId: task.action_id ? Number(task.action_id) : null,
+        assignee: task.assignee,
+        instruction: task.instruction,
+        deadline: task.deadline,
+        entityType: task.entity_type,
+        entityId: task.entity_id,
+        entityName: task.entity_name,
+        status: task.status,
+        createdAt: task.created_at,
+        updatedAt: task.updated_at
+      }))
+    };
+  }
+
+  async createTask(
+    user: IAuthUser | undefined,
+    payload: {
+      actionId?: number | null;
+      assignee: string;
+      instruction: string;
+      deadline?: string | null;
+      entityType?: string | null;
+      entityId?: string | null;
+      entityName?: string | null;
+    }
+  ) {
+    const tenantId = await this.resolveTenantId(user);
+    const actionId = payload.actionId ? Number(payload.actionId) : null;
+    if (actionId) {
+      const actionRows = await this.db.query(`select id from actions where tenant_id = $1 and id = $2 limit 1`, [tenantId, actionId]);
+      if (!actionRows.length) {
+        throw new Error('Action not found');
+      }
+    }
+    const inserted = await this.db.query(
+      `
+      insert into action_tasks (
+        tenant_id, action_id, assignee, instruction, deadline, entity_type, entity_id, entity_name, status, created_by
+      )
+      values ($1,$2,$3,$4,$5::date,$6,$7,$8,'open',$9)
+      returning *
+      `,
+      [
+        tenantId,
+        actionId,
+        payload.assignee,
+        payload.instruction,
+        payload.deadline || null,
+        payload.entityType || null,
+        payload.entityId || null,
+        payload.entityName || null,
+        user?.id || 'system'
+      ]
+    );
+    const task = inserted[0];
+    if (actionId) {
+      await this.db.query(
+        `
+        insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+        values ($1,$2,'assign',$3,$4,$5::jsonb,$6)
+        `,
+        [
+          tenantId,
+          actionId,
+          `Assigned task to ${payload.assignee}`,
+          payload.instruction,
+          JSON.stringify({ deadline: payload.deadline || null }),
+          user?.id || 'system'
+        ]
+      );
+    }
+    return {
+      id: Number(task.id),
+      actionId: task.action_id ? Number(task.action_id) : null,
+      assignee: task.assignee,
+      instruction: task.instruction,
+      deadline: task.deadline,
+      entityType: task.entity_type,
+      entityId: task.entity_id,
+      entityName: task.entity_name,
+      status: task.status,
+      createdAt: task.created_at,
+      updatedAt: task.updated_at
+    };
+  }
+
+  async updateTask(
+    user: IAuthUser | undefined,
+    taskId: number,
+    payload: { status?: string; assignee?: string; instruction?: string; deadline?: string | null }
+  ) {
+    const tenantId = await this.resolveTenantId(user);
+    const rows = await this.db.query(`select * from action_tasks where tenant_id = $1 and id = $2 limit 1`, [tenantId, taskId]);
+    const existing = rows[0];
+    if (!existing) {
+      throw new Error('Task not found');
+    }
+    const updatedRows = await this.db.query(
+      `
+      update action_tasks
+      set
+        status = $3,
+        assignee = $4,
+        instruction = $5,
+        deadline = $6::date,
+        updated_at = now()
+      where tenant_id = $1 and id = $2
+      returning *
+      `,
+      [
+        tenantId,
+        taskId,
+        payload.status || existing.status,
+        payload.assignee || existing.assignee,
+        payload.instruction || existing.instruction,
+        payload.deadline === undefined ? existing.deadline : payload.deadline
+      ]
+    );
+    const task = updatedRows[0];
+    if (task.action_id && payload.status && payload.status !== existing.status) {
+      await this.db.query(
+        `
+        insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+        values ($1,$2,'updated',$3,$4,$5::jsonb,$6)
+        `,
+        [
+          tenantId,
+          task.action_id,
+          payload.status === 'done' ? 'Completed task' : 'Re-opened task',
+          task.instruction,
+          JSON.stringify({ taskId }),
+          user?.id || 'system'
+        ]
+      );
+    }
+    return {
+      id: Number(task.id),
+      actionId: task.action_id ? Number(task.action_id) : null,
+      assignee: task.assignee,
+      instruction: task.instruction,
+      deadline: task.deadline,
+      entityType: task.entity_type,
+      entityId: task.entity_id,
+      entityName: task.entity_name,
+      status: task.status,
+      createdAt: task.created_at,
+      updatedAt: task.updated_at
+    };
+  }
+
+  async deleteTask(user: IAuthUser | undefined, taskId: number) {
+    const tenantId = await this.resolveTenantId(user);
+    const rows = await this.db.query(`select * from action_tasks where tenant_id = $1 and id = $2 limit 1`, [tenantId, taskId]);
+    const task = rows[0];
+    if (!task) {
+      throw new Error('Task not found');
+    }
+    await this.db.query(`delete from action_tasks where tenant_id = $1 and id = $2`, [tenantId, taskId]);
+    if (task.action_id) {
+      await this.db.query(
+        `
+        insert into action_events (tenant_id, action_id, event_type, label, detail, payload, created_by)
+        values ($1,$2,'dismissed','Deleted task',$3,$4::jsonb,$5)
+        `,
+        [tenantId, task.action_id, task.instruction, JSON.stringify({ taskId }), user?.id || 'system']
+      );
     }
   }
 

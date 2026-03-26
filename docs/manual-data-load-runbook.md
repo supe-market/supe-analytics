@@ -2,6 +2,8 @@
 
 ## Scope
 - Ingestion API supports strict `orders_book` `.xlsx` uploads.
+- Imports are queued and processed asynchronously by the service worker.
+- Raw uploaded files must be persisted to S3 for worker pickup.
 - Manual SQL/scripts remain a fallback for direct data correction.
 
 ## Import Contract (When Ingestion Is Enabled)
@@ -9,6 +11,7 @@
 - Sheet name must be exactly `orders_book`.
 - Header names must exactly match the finalized template.
 - `S.no` is required in template for user readability and row-level error reporting, but ignored for writes.
+- CSV, `.xls`, alternate sheet names, and source-mapping are not supported.
 
 ## Minimum Insert Order
 1. `tenants`
@@ -70,6 +73,6 @@ having count(*) > 1;
 ```
 
 ## Post-Load Ops
-1. Recompute snapshots through service flow used by your environment.
-2. Trigger signal evaluation endpoint.
-3. Trigger targets recompute endpoint.
+1. Upload creates an import batch and returns immediately after queueing.
+2. The background worker performs row validation, canonical writes, snapshot refresh, signal evaluation, and target recompute.
+3. Track batch state through `/api/v1/imports` and `/api/v1/imports/:id`.

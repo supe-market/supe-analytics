@@ -3,15 +3,23 @@ import cookie from '@fastify/cookie';
 import { env } from '../config/env';
 import { COOKIE_NAME_BY_APP_TYPE, FALLBACK_COOKIE_NAMES } from '../config/constants';
 import { verifyOauthCode, verifySessionToken } from '../auth/umsAuthClient';
-import { IAuthUser } from '../types';
 
-const cookieOptions = {
-  httpOnly: true,
-  signed: true,
-  secure: env.NODE_ENV === 'production',
-  sameSite: env.NODE_ENV === 'production' ? ('none' as const) : ('lax' as const),
-  path: '/'
-};
+function buildCookieOptions(request: FastifyRequest) {
+  const forwardedProto = request.headers['x-forwarded-proto'];
+  const isHttps =
+    request.protocol === 'https' ||
+    forwardedProto === 'https' ||
+    (Array.isArray(forwardedProto) && forwardedProto.includes('https'));
+  const sameSite: 'none' | 'lax' = isHttps || env.NODE_ENV === 'production' ? 'none' : 'lax';
+
+  return {
+    httpOnly: true,
+    signed: true,
+    secure: isHttps || env.NODE_ENV === 'production',
+    sameSite,
+    path: '/'
+  };
+}
 
 function getCookieName(request: FastifyRequest): string {
   const appType = String(request.headers.apptype || request.headers.appType || '');
@@ -42,26 +50,12 @@ function getSessionTokenFromRequest(request: FastifyRequest): string | null {
   return null;
 }
 
-function getBypassUser(): IAuthUser {
-  return {
-    id: env.AUTH_BYPASS_USER_ID,
-    userType: env.AUTH_BYPASS_USER_TYPE,
-    userRole: env.AUTH_BYPASS_USER_ROLE,
-    tenantId: env.DEV_TENANT_ID
-  };
-}
-
 export async function registerAuth(app: any): Promise<void> {
   await app.register(cookie, { secret: env.COOKIE_SECRET, parseOptions: {} });
 
   app.decorate(
     'authenticate',
     async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      if (env.AUTH_BYPASS) {
-        request.user = getBypassUser();
-        return;
-      }
-
       const token = getSessionTokenFromRequest(request);
       if (!token) {
         reply.status(403).send({
@@ -87,12 +81,6 @@ export async function registerAuth(app: any): Promise<void> {
   );
 
   const cookieHandler = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (env.AUTH_BYPASS) {
-      request.user = getBypassUser();
-      reply.status(200).send({ success: true, message: 'cookie-set-bypass' });
-      return;
-    }
-
     const oauthCodeRaw = (request.query as Record<string, unknown> | undefined)?.oauthCode;
     const oauthCode = typeof oauthCodeRaw === 'string' ? oauthCodeRaw : '';
     if (oauthCode) {
@@ -103,7 +91,7 @@ export async function registerAuth(app: any): Promise<void> {
       }
 
       const cookieName = getCookieName(request);
-      reply.setCookie(cookieName, oauthResult.token, cookieOptions);
+      reply.setCookie(cookieName, oauthResult.token, buildCookieOptions(request));
       request.user = oauthResult.user;
       reply.status(200).send({ success: true, message: 'cookie-set' });
       return;
@@ -127,7 +115,7 @@ export async function registerAuth(app: any): Promise<void> {
 
   const clearCookieHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
     for (const cookieName of FALLBACK_COOKIE_NAMES) {
-      reply.clearCookie(cookieName, cookieOptions);
+      reply.clearCookie(cookieName, buildCookieOptions(_request));
     }
     reply.status(200).send({ success: true, message: 'Deleted' });
   };

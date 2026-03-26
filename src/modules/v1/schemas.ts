@@ -49,6 +49,7 @@ export const signalDefaultsSchema = z.object({
 });
 
 export const signalOverridesSchema = z.object({
+  replaceSignalDefinitionIds: z.array(z.coerce.number()).optional().default([]),
   overrides: z.array(
     z.object({
       signalDefinitionId: z.coerce.number().optional(),
@@ -59,6 +60,66 @@ export const signalOverridesSchema = z.object({
       isEnabled: z.boolean().optional().default(true)
     })
   )
+});
+
+const actionTargetSchema = z.object({
+  entityType: z.enum(['salesman', 'retailer', 'beat', 'sku', 'distributor']),
+  entityId: z.string().min(1),
+  entityName: z.string().optional(),
+  metadata: z.record(z.string(), z.any()).optional()
+});
+
+const taskPayloadSchema = z.object({
+  assignee: z.string().min(1),
+  instruction: z.string().min(1),
+  deadline: z.string().optional().nullable(),
+  entityType: z.enum(['salesman', 'retailer', 'beat', 'sku', 'distributor']).optional().nullable(),
+  entityId: z.string().optional().nullable(),
+  entityName: z.string().optional().nullable()
+});
+
+export const createActionSchema = z.object({
+  type: z.enum(['nudge', 'scheme', 'goal_push', 'collection', 'announcement']),
+  title: z.string().min(1),
+  status: z.enum(['draft', 'active', 'completed', 'cancelled']).optional().default('draft'),
+  sourceKind: z.enum(['signal', 'manual', 'ask', 'goal']).optional().default('manual'),
+  sourceKey: z.string().optional().nullable(),
+  sourceEntityType: z.string().optional().nullable(),
+  sourceEntityId: z.string().optional().nullable(),
+  sourceEntityName: z.string().optional().nullable(),
+  audienceType: z.enum(['salesman', 'retailer', 'beat', 'sku', 'distributor']).optional().nullable(),
+  payload: z.record(z.string(), z.any()).optional(),
+  targets: z.array(actionTargetSchema).optional().default([]),
+  initialTask: taskPayloadSchema.optional()
+});
+
+export const updateActionSchema = z.object({
+  title: z.string().min(1).optional(),
+  status: z.enum(['draft', 'active', 'completed', 'cancelled']).optional(),
+  payload: z.record(z.string(), z.any()).optional()
+});
+
+export const actionEventSchema = z.object({
+  eventType: z.enum(['created', 'updated', 'status_changed', 'note', 'assign', 'dismissed']),
+  label: z.string().min(1),
+  detail: z.string().optional().nullable(),
+  payload: z.record(z.string(), z.any()).optional(),
+  task: taskPayloadSchema.optional()
+});
+
+export const actionsListQuerySchema = z.object({
+  status: z.enum(['draft', 'active', 'completed', 'cancelled']).optional()
+});
+
+export const createTaskSchema = taskPayloadSchema.extend({
+  actionId: z.coerce.number().optional().nullable()
+});
+
+export const updateTaskSchema = z.object({
+  status: z.enum(['open', 'done']).optional(),
+  assignee: z.string().min(1).optional(),
+  instruction: z.string().min(1).optional(),
+  deadline: z.string().optional().nullable()
 });
 
 export const trajectoryQuerySchema = z.object({
@@ -115,9 +176,8 @@ export const legacyUpdateTargetSchema = z.object({
   notes: z.string().nullable().optional()
 });
 
-export const importMetaSchema = z.object({
-  sourceCode: z.enum(['XLSX_UPLOAD']).optional(),
-  sourceSheetName: z.string().optional()
+export const importsListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20)
 });
 
 export const saveComparePresetSchema = z.object({

@@ -1,9 +1,8 @@
 import { FastifyInstance } from 'fastify';
-import pino from 'pino';
 import { env } from '../config/env';
 
 export function buildLogger() {
-  return pino({
+  return {
     level: env.NODE_ENV === 'development' ? 'debug' : 'info',
     transport:
       env.NODE_ENV === 'development'
@@ -15,7 +14,7 @@ export function buildLogger() {
             }
           }
         : undefined
-  });
+  };
 }
 
 export async function registerLogger(app: FastifyInstance): Promise<void> {

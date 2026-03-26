@@ -1,11 +1,17 @@
+import { readFile } from 'fs/promises';
+import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { SupeV1Service } from './service';
 import {
+  actionEventSchema,
+  actionsListQuerySchema,
   compareRunSchema,
+  createActionSchema,
   createPersonSchema,
+  createTaskSchema,
   createTargetAssignmentSchema,
-  importMetaSchema,
+  importsListQuerySchema,
   observeDetailQuerySchema,
   legacyCreateTargetSchema,
   legacyUpdateTargetSchema,
@@ -14,7 +20,9 @@ import {
   saveComparePresetSchema,
   signalDefaultsSchema,
   signalOverridesSchema,
-  trajectoryQuerySchema
+  trajectoryQuerySchema,
+  updateActionSchema,
+  updateTaskSchema
 } from './schemas';
 
 function parseSchema<T>(schema: z.ZodSchema<T>, payload: unknown): T {
@@ -26,12 +34,6 @@ function parseSchema<T>(schema: z.ZodSchema<T>, payload: unknown): T {
     }
     throw error;
   }
-}
-
-function parseImportMeta(fileFields: Record<string, any> | undefined): { sourceCode?: string; sourceSheetName?: string } {
-  const sourceCode = fileFields?.sourceCode?.value ? String(fileFields.sourceCode.value) : undefined;
-  const sourceSheetName = fileFields?.sourceSheetName?.value ? String(fileFields.sourceSheetName.value) : undefined;
-  return parseSchema(importMetaSchema, { sourceCode, sourceSheetName });
 }
 
 async function routeWrap(reply: FastifyReply, callback: () => Promise<void>): Promise<void> {
@@ -56,9 +58,27 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
       if (!multipartFile) {
         throw new Error('file is required');
       }
-      const meta = parseImportMeta(multipartFile.fields);
-      const result = await service.createImport(request.user, multipartFile, meta);
+      const result = await service.createImport(request.user, multipartFile);
       reply.status(201).send({ success: true, data: result });
+    });
+  });
+
+  app.get('/imports', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const query = parseSchema(importsListQuerySchema, request.query);
+      const result = await service.listImports(request.user, query.limit);
+      reply.status(200).send({ success: true, data: result });
+    });
+  });
+
+  app.get('/imports/template', { preHandler: app.authenticate }, async (_request, reply) => {
+    await routeWrap(reply, async () => {
+      const templatePath = path.resolve(process.cwd(), 'docs/templates/customer-data-template.xlsx');
+      const buffer = await readFile(templatePath);
+      reply
+        .type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        .header('content-disposition', 'attachment; filename="customer-data-template.xlsx"')
+        .send(buffer);
     });
   });
 
@@ -142,7 +162,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
   app.put('/signals/config/overrides', { preHandler: app.authenticate }, async (request, reply) => {
     await routeWrap(reply, async () => {
       const body = parseSchema(signalOverridesSchema, request.body);
-      await service.updateSignalOverrides(request.user, body.overrides);
+      await service.updateSignalOverrides(request.user, body.overrides, body.replaceSignalDefinitionIds);
       reply.status(200).send({ success: true });
     });
   });
@@ -158,6 +178,94 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     await routeWrap(reply, async () => {
       const runId = await service.evaluateSignals(request.user);
       reply.status(200).send({ success: true, data: { runId } });
+    });
+  });
+
+  app.get('/actions/dashboard', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const data = await service.getActionsDashboard(request.user);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.get('/actions', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const query = parseSchema(actionsListQuerySchema, request.query);
+      const data = await service.listActions(request.user, query);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.get('/actions/:id', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      const data = await service.getActionById(request.user, Number(params.id));
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.post('/actions', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const body = parseSchema(createActionSchema, request.body);
+      const data = await service.createAction(request.user, body);
+      reply.status(201).send({ success: true, data });
+    });
+  });
+
+  app.patch('/actions/:id', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      const body = parseSchema(updateActionSchema, request.body);
+      const data = await service.updateAction(request.user, Number(params.id), body);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.post('/actions/:id/events', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      const body = parseSchema(actionEventSchema, request.body);
+      const data = await service.appendActionEvent(request.user, Number(params.id), body);
+      reply.status(201).send({ success: true, data });
+    });
+  });
+
+  app.get('/action-log', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const data = await service.getActionLog(request.user);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.get('/tasks', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const data = await service.listTasks(request.user);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.post('/tasks', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const body = parseSchema(createTaskSchema, request.body);
+      const data = await service.createTask(request.user, body);
+      reply.status(201).send({ success: true, data });
+    });
+  });
+
+  app.patch('/tasks/:id', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      const body = parseSchema(updateTaskSchema, request.body);
+      const data = await service.updateTask(request.user, Number(params.id), body);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
+  app.delete('/tasks/:id', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      await service.deleteTask(request.user, Number(params.id));
+      reply.status(200).send({ success: true });
     });
   });
 

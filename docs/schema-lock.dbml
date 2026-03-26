@@ -20,9 +20,24 @@ Table import_batches {
   total_columns int [not null, default: 0]
   valid_rows int [not null, default: 0]
   rejected_rows int [not null, default: 0]
+  error_count int [not null, default: 0]
   import_status text [not null, default: 'UPLOADED']
   notes text
+  started_at timestamptz
+  completed_at timestamptz
+  processed_by text
   imported_at timestamptz [not null, default: `now()`]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table import_batch_errors {
+  id bigint [pk, increment]
+  import_batch_id bigint [not null, ref: > import_batches.id]
+  row_number int [not null, default: 0]
+  s_no text
+  column_name text [not null]
+  message text [not null]
+  phase text [not null]
   created_at timestamptz [not null, default: `now()`]
 }
 

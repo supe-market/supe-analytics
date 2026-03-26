@@ -16,6 +16,8 @@ npm install
 cp .env.example .env
 ```
 
+Supe auth requires a real auth-service user and OAuth client. There is no analytics-side dev auth bypass.
+
 ## Run
 
 ```bash
@@ -40,12 +42,20 @@ npm run typeorm:revert
 
 - `/api/v1/cookie`
 - `/api/v1/oms/cookie`
-- `/api/v1/imports` (strict `.xlsx` + `orders_book` contract)
+- `/api/v1/imports` (strict `.xlsx` + `orders_book` contract, async batch processing)
+- `/api/v1/imports/template`
 - `/api/v1/observe/*`
 - `/api/v1/signals/*`
 - `/api/v1/compare/*`
 - `/api/v1/trajectory`
 - `/api/v1/targets/*`
+
+## Imports
+
+- Supports only strict `.xlsx` uploads using the `orders_book` sheet.
+- CSV, `.xls`, alternate sheet names, and source-mapping are not supported.
+- Uploads are queued and processed by the background import worker.
+- S3 object storage is required because queued imports are processed after the request completes.
 
 ## Schema-Lock References
 

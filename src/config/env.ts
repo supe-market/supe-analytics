@@ -20,12 +20,6 @@ const envSchema = z.object({
   UMS_AUTH_URL: z.string().default('http://localhost:3201/api/v1'),
   UMS_AUTH_PARAM: z.string().default(''),
 
-  AUTH_BYPASS: z.string().optional().default('false'),
-  AUTH_BYPASS_USER_ID: z.string().default('dev-supe-user'),
-  AUTH_BYPASS_USER_TYPE: z.string().default('supe'),
-  AUTH_BYPASS_USER_ROLE: z.string().default('supe'),
-  DEV_TENANT_ID: z.string().default('dev-tenant'),
-
   S3_REGION: z.string().default('ap-south-1'),
   S3_BUCKET: z.string().default(''),
   S3_ENDPOINT: z.string().optional().default(''),
@@ -35,7 +29,10 @@ const envSchema = z.object({
 
   DEFAULT_WORKSPACE_ID: z.string().optional(),
   DEFAULT_WORKSPACE_NAME: z.string().default('Default Workspace'),
-  IMPORT_MAX_FILE_MB: z.coerce.number().default(25)
+  IMPORT_MAX_FILE_MB: z.coerce.number().default(25),
+  IMPORT_WORKER_ENABLED: z.string().optional().default('false'),
+  IMPORT_POLL_INTERVAL_MS: z.coerce.number().default(5000),
+  IMPORT_WORKER_CONCURRENCY: z.coerce.number().default(1)
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -46,8 +43,8 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   DB_SSL: parsed.data.DB_SSL === 'true',
-  AUTH_BYPASS: parsed.data.AUTH_BYPASS === 'true',
-  S3_FORCE_PATH_STYLE: parsed.data.S3_FORCE_PATH_STYLE === 'true'
+  S3_FORCE_PATH_STYLE: parsed.data.S3_FORCE_PATH_STYLE === 'true',
+  IMPORT_WORKER_ENABLED: parsed.data.IMPORT_WORKER_ENABLED === 'true'
 };
 
 export type AppEnv = typeof env;
