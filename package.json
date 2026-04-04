@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test tests/**/*.test.ts",
     "start": "node dist/server.js",
     "typeorm": "tsx ./node_modules/typeorm/cli.js -d src/db/data-source.ts",
     "typeorm:migrate": "npm run typeorm -- migration:run",
