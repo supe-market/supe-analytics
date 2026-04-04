@@ -3,6 +3,27 @@ import { z } from 'zod';
 
 dotenv.config();
 
+function parsePostgresUrl(rawUrl: string | undefined) {
+  if (!rawUrl) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    return {
+      host: parsed.hostname || 'localhost',
+      port: parsed.port ? Number(parsed.port) : 5432,
+      user: decodeURIComponent(parsed.username || 'postgres'),
+      password: decodeURIComponent(parsed.password || 'postgres'),
+      name: parsed.pathname.replace(/^\//, '') || 'supe_analytics'
+    };
+  } catch {
+    return null;
+  }
+}
+
+const parsedDatabaseUrl = parsePostgresUrl(process.env.DATABASE_URL || process.env.DB_URL);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('0.0.0.0'),
@@ -10,11 +31,12 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().default('supe-analytics-cookie-secret'),
   ALLOWED_ORIGINS: z.string().default('.*'),
 
-  DB_HOST: z.string().default('localhost'),
-  DB_PORT: z.coerce.number().default(5432),
-  DB_USER: z.string().default('postgres'),
-  DB_PASSWORD: z.string().default('postgres'),
-  DB_NAME: z.string().default('supe_analytics'),
+  DATABASE_URL: z.string().optional().default(process.env.DATABASE_URL || process.env.DB_URL || ''),
+  DB_HOST: z.string().default(parsedDatabaseUrl?.host || 'localhost'),
+  DB_PORT: z.coerce.number().default(parsedDatabaseUrl?.port || 5432),
+  DB_USER: z.string().default(parsedDatabaseUrl?.user || 'postgres'),
+  DB_PASSWORD: z.string().default(parsedDatabaseUrl?.password || 'postgres'),
+  DB_NAME: z.string().default(parsedDatabaseUrl?.name || 'supe_analytics'),
   DB_SSL: z.string().optional().default('false'),
 
   UMS_AUTH_URL: z.string().default('http://localhost:3201/api/v1'),
@@ -26,6 +48,17 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional().default(''),
   S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
   S3_FORCE_PATH_STYLE: z.string().optional().default('false'),
+
+  ASK_REDIS_URL: z.string().optional(),
+  ASK_REDIS_HOST: z.string().optional(),
+  ASK_REDIS_PORT: z.coerce.number().default(6379),
+  ASK_REDIS_DB: z.coerce.number().default(0),
+  ASK_REDIS_USERNAME: z.string().optional(),
+  ASK_REDIS_PASSWORD: z.string().optional(),
+  REDIS_HOST: z.string().optional(),
+  REDIS_PORT: z.coerce.number().default(6379),
+  REDIS_PASSWORD: z.string().optional(),
+  ASK_GRAPH_CACHE_TTL_SECONDS: z.coerce.number().default(43200),
 
   DEFAULT_WORKSPACE_ID: z.string().optional(),
   DEFAULT_WORKSPACE_NAME: z.string().default('Default Workspace'),

@@ -1,3 +1,9 @@
+/**
+ * Core analytics service powering the Supe dashboards.
+ *
+ * This file aggregates workspace resolution, time-range handling, raw entity
+ * loading, event aggregation, and response shaping for the observe/targets flow.
+ */
 import { DataSource } from 'typeorm';
 import { SupeEntityType, IAuthUser } from '../../types';
 import { LdrCanonicalEvent, LdrEntity, LdrTarget } from '../../db/entities';
@@ -31,6 +37,7 @@ interface IEntityMetricRow {
 }
 
 function parseNumber(value: unknown): number {
+  /** Normalize DB or JSON metric values into finite numbers. */
   if (value === null || value === undefined || value === '') {
     return 0;
   }
@@ -39,6 +46,7 @@ function parseNumber(value: unknown): number {
 }
 
 function formatIndianNumber(value: number, decimals = 0): string {
+  /** Render a number with Indian grouping rules for UI-friendly summaries. */
   return value.toLocaleString('en-IN', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals
@@ -46,6 +54,7 @@ function formatIndianNumber(value: number, decimals = 0): string {
 }
 
 function formatCurrency(value: number): string {
+  /** Render INR currency values used by revenue-style cards and tables. */
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
@@ -71,6 +80,7 @@ function daysBetween(fromDate: Date, toDate: Date): number {
 }
 
 function getRangeFromQuery(timeRange?: string, period?: string): ITimeRange {
+  /** Convert dashboard time-range labels into current and previous date windows. */
   const toDate = getCurrentISTDate();
   let fromDate = toDate;
   const range = timeRange || period || 'last30d';
@@ -147,6 +157,7 @@ function getAttrsString(entity: LdrEntity, key: string): string | null {
 }
 
 export class SupeService {
+  /** Domain service for the analytics APIs used by the Supe product UI. */
   private readonly repository: SupeRepository;
 
   constructor(private readonly db: DataSource) {
@@ -154,6 +165,7 @@ export class SupeService {
   }
 
   private async resolveWorkspace(query: Record<string, unknown>, user?: IAuthUser): Promise<string> {
+    /** Resolve the active workspace from explicit params or the authenticated user. */
     const companyId = query.companyId ? String(query.companyId) : undefined;
     const workspaceId = query.workspaceId ? String(query.workspaceId) : undefined;
 
@@ -165,6 +177,7 @@ export class SupeService {
   }
 
   private sortRows(rows: IEntityMetricRow[], sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc'): IEntityMetricRow[] {
+    /** Apply a stable metric-driven sort used by list endpoints. */
     const key = sortBy || 'revenue';
     return [...rows].sort((a, b) => {
       const aValue = parseNumber(a.metrics[key]);
@@ -177,6 +190,7 @@ export class SupeService {
   }
 
   private paginateRows<T>(rows: T[], page: number, limit: number): { data: T[]; meta: any } {
+    /** Slice rows into the pagination shape returned to the frontend. */
     const safePage = Math.max(page, 1);
     const safeLimit = Math.max(limit, 1);
     const offset = (safePage - 1) * safeLimit;
@@ -194,6 +208,7 @@ export class SupeService {
   }
 
   private getDefaultMetricsRow(entity: LdrEntity): IEntityMetricRow {
+    /** Create the zeroed metric accumulator used before event aggregation. */
     return {
       id: entity.id,
       name: entity.displayName,

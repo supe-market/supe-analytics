@@ -1,3 +1,9 @@
+/**
+ * Fastify application factory for supe-analytics.
+ *
+ * The app is assembled from small plugins so auth, DB lifecycle, uploads, and
+ * API routes stay separately testable.
+ */
 import Fastify from 'fastify';
 import { registerCors } from './plugins/cors';
 import { registerDb } from './plugins/db';
@@ -8,6 +14,7 @@ import { registerMultipart } from './plugins/multipart';
 import { registerImportWorker } from './plugins/import-worker';
 
 export async function buildApp() {
+  /** Create and configure the analytics Fastify instance. */
   const app = Fastify({
     logger: buildLogger()
   });
@@ -18,6 +25,8 @@ export async function buildApp() {
   registerImportWorker(app);
   await registerAuth(app);
 
+  // All product APIs are mounted under the v1 prefix. Health and process wiring
+  // stay outside this file in `server.ts`.
   await app.register(async (v1) => {
     await registerApiRoutes(v1);
   }, { prefix: '/api/v1' });

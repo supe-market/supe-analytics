@@ -3,6 +3,7 @@ import { DataSource, QueryRunner } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { env } from '../../config/env';
+import { refreshCatalogForTenant, type CatalogRefreshResult, type TenantCatalogTarget } from '../../lib/catalog-refresh';
 import { IAuthUser } from '../../types';
 import {
   daysBetweenDates,
@@ -69,7 +70,7 @@ const SUPPORTED_AGGREGATE_ENTITY_TYPES_BY_TARGET_KEY: Record<string, string[]> =
   outstanding_reduction: ['salesman', 'retailer', 'beat', 'distributor']
 };
 
-const ORDERS_BOOK_HEADERS = [
+export const ORDERS_BOOK_HEADERS = [
   'S.no',
   'distributors.distributor_code',
   'distributors.distributor_name',
@@ -392,6 +393,21 @@ export class SupeV1Service {
         [tenantId, targetKey, targetName, metricKey, metricUnit, comparisonOperator]
       );
     }
+  }
+
+  private async resolveTenantCatalogTarget(tenantId: number): Promise<TenantCatalogTarget> {
+    const rows = await this.db.query(`select id, tenant_code from tenants where id = $1 limit 1`, [tenantId]);
+    if (!rows.length) {
+      throw new Error(`Tenant ${tenantId} not found`);
+    }
+    return {
+      id: Number(rows[0].id),
+      tenantCode: String(rows[0].tenant_code)
+    };
+  }
+
+  protected async refreshCatalogState(tenant: TenantCatalogTarget, triggeredBy: string): Promise<CatalogRefreshResult> {
+    return refreshCatalogForTenant(this.db, tenant, triggeredBy);
   }
 
   private async uploadToS3(tenantCode: string, fileName: string, buffer: Buffer, contentType: string): Promise<string> {
@@ -2740,22 +2756,31 @@ export class SupeV1Service {
     }
   }
 
-  private async runPostImportSync(tenantId: number, triggeredBy: string): Promise<{ signalRunId: number }> {
+  public async refreshTenantState(
+    tenantId: number,
+    triggeredBy: string
+  ): Promise<{ signalRunId: number; catalog: CatalogRefreshResult }> {
+    const tenant = await this.resolveTenantCatalogTarget(tenantId);
+    await this.seedStaticData(tenant.id);
+
     const runner = this.db.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
+    let signalRunId = 0;
     try {
-      await this.refreshSnapshots(runner, tenantId);
-      const signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
-      await this.recomputeTargetProgressInternal(runner, tenantId);
+      await this.refreshSnapshots(runner, tenant.id);
+      signalRunId = await this.evaluateSignalsInternal(runner, tenant.id, triggeredBy);
+      await this.recomputeTargetProgressInternal(runner, tenant.id);
       await runner.commitTransaction();
-      return { signalRunId };
     } catch (error) {
       await runner.rollbackTransaction();
       throw error;
     } finally {
       await runner.release();
     }
+
+    const catalog = await this.refreshCatalogState(tenant, triggeredBy);
+    return { signalRunId, catalog };
   }
 
   async createImport(user: IAuthUser | undefined, file: ImportableFile) {
@@ -2933,7 +2958,7 @@ export class SupeV1Service {
     }
 
     try {
-      const postImport = await this.runPostImportSync(batch.tenantId, workerId);
+      const postImport = await this.refreshTenantState(batch.tenantId, workerId);
       await this.db.query(
         `
         update import_batches
@@ -2942,7 +2967,10 @@ export class SupeV1Service {
             completed_at = now()
         where id = $1
         `,
-        [batchId, `signal_run=${postImport.signalRunId}`]
+        [
+          batchId,
+          `signal_run=${postImport.signalRunId};catalog_tables=${postImport.catalog.refreshedTables};catalog_columns=${postImport.catalog.refreshedColumns}`
+        ]
       );
     } catch (error: any) {
       await this.failImportBatch(

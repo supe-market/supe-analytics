@@ -1,30 +1,33 @@
 # supe-analytics
 
-Supe Market v1 backend service for supe analytics.
+Supe Market analytics API.
 
-## Stack
+## Responsibilities
 
-- Node.js + TypeScript
-- Fastify + Zod
-- TypeORM + PostgreSQL
-- S3 object storage for raw uploaded files
+- serve the Supe analytics API
+- verify Supe auth sessions through `auth-service`
+- queue and process import uploads
+- persist analytics data in PostgreSQL
+- store raw import files in S3 when imports are enabled
 
-## Setup
+## Local Development
 
 ```bash
 npm install
 cp .env.example .env
-```
-
-Supe auth requires a real auth-service user and OAuth client. There is no analytics-side dev auth bypass.
-
-## Run
-
-```bash
 npm run dev
 ```
 
-## Build
+This service depends on:
+
+- PostgreSQL reachable through `DATABASE_URL` or the fallback `DB_*` variables
+- a reachable `auth-service`
+- `UMS_AUTH_PARAM` from the auth bootstrap flow
+- S3 only if you are testing imports
+
+There is no analytics-side auth bypass.
+
+## Build and Run
 
 ```bash
 npm run build
@@ -56,8 +59,8 @@ npm run typeorm:revert
 - CSV, `.xls`, alternate sheet names, and source-mapping are not supported.
 - Uploads are queued and processed by the background import worker.
 - S3 object storage is required because queued imports are processed after the request completes.
+- In both dev and prod, PostgreSQL can stay outside Docker as long as the configured database URL is reachable from the container or process.
 
-## Schema-Lock References
+## Reference Assets
 
 - DBML: `docs/schema-lock.dbml`
-- Manual load runbook: `docs/manual-data-load-runbook.md`

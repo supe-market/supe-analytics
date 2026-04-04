@@ -1,7 +1,11 @@
+/**
+ * Process entrypoint for the analytics API server.
+ */
 import { buildApp } from './app';
 import { env } from './config/env';
 
 async function bootstrap() {
+  /** Build the Fastify app and start listening on the configured host/port. */
   const app = await buildApp();
 
   try {

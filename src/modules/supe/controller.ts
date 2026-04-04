@@ -1,10 +1,18 @@
+/**
+ * Thin controller layer for the legacy Supe routes.
+ *
+ * Each method delegates to `SupeService`, then shapes the HTTP response and
+ * normalizes user-facing errors.
+ */
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { SupeService } from './service';
 
 export class SupeController {
+  /** Bridge Fastify handlers to the service layer. */
   constructor(private readonly service: SupeService) {}
 
   async getObserveSummary(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    /** Return the dashboard-style observe summary for the current workspace. */
     try {
       const data = await this.service.getObserveSummary(request.query as any, request.user);
       reply.status(200).send({ success: true, data });
@@ -18,6 +26,7 @@ export class SupeController {
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
+    /** Return a paginated observe list for a single entity type. */
     try {
       const data = await this.service.getObserveEntityList(entityType, request.query as any, request.user);
       reply.status(200).send({ success: true, data: data.data, meta: data.meta });
@@ -27,6 +36,7 @@ export class SupeController {
   }
 
   async getObserveEntityInsights(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    /** Return detail metrics for a single observe entity. */
     try {
       const params = request.params as { entityType: any; id: string };
       const data = await this.service.getObserveEntityInsights(params.entityType, params.id, request.query as any, request.user);

@@ -1,3 +1,9 @@
+/**
+ * Main versioned analytics route registration.
+ *
+ * This module maps validated HTTP payloads onto `SupeV1Service` operations and
+ * keeps endpoint-level error formatting consistent.
+ */
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -26,6 +32,7 @@ import {
 } from './schemas';
 
 function parseSchema<T>(schema: z.ZodSchema<T>, payload: unknown): T {
+  /** Parse request data with Zod and normalize validation failures. */
   try {
     return schema.parse(payload);
   } catch (error) {
@@ -37,6 +44,7 @@ function parseSchema<T>(schema: z.ZodSchema<T>, payload: unknown): T {
 }
 
 async function routeWrap(reply: FastifyReply, callback: () => Promise<void>): Promise<void> {
+  /** Convert service errors into the API's standard failure response shape. */
   try {
     await callback();
   } catch (error: any) {
@@ -50,6 +58,7 @@ async function routeWrap(reply: FastifyReply, callback: () => Promise<void>): Pr
 }
 
 export async function registerV1Routes(app: FastifyInstance): Promise<void> {
+  /** Register the v1 product APIs on an authenticated Fastify instance. */
   const service = new SupeV1Service(app.db);
 
   app.post('/imports', { preHandler: app.authenticate }, async (request, reply) => {
