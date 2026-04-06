@@ -30,6 +30,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3010),
   COOKIE_SECRET: z.string().default('supe-analytics-cookie-secret'),
   ALLOWED_ORIGINS: z.string().default('.*'),
+  // Sliding session window in seconds. Default: 2 hours of inactivity → logout.
+  SESSION_TTL_SECONDS: z.coerce.number().default(2 * 60 * 60),
 
   DATABASE_URL: z.string().optional().default(process.env.DATABASE_URL || process.env.DB_URL || ''),
   DB_HOST: z.string().default(parsedDatabaseUrl?.host || 'localhost'),
