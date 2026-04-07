@@ -1,4 +1,6 @@
 import { createHash } from 'crypto';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { DataSource, QueryRunner } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -17,6 +19,8 @@ import {
   startOfQuarter,
   startOfYear
 } from '../../utils/ist-date';
+
+const copyFrom = require('pg-copy-streams').from as (sql: string) => any;
 
 type ImportableFile = {
   filename: string;
@@ -182,9 +186,190 @@ type ImportBatchSummary = {
   startedAt: string | null;
   completedAt: string | null;
   processedBy: string | null;
+  refreshJobId: number | null;
+  refreshStatus: string | null;
+  refreshRequestedAt: string | null;
+  refreshStartedAt: string | null;
+  refreshCompletedAt: string | null;
+  refreshError: string | null;
   importedAt: string;
   createdAt: string;
 };
+
+type NormalizedOrdersBookRow = {
+  source_row_number: number;
+  s_no: string;
+  distributor_code: string;
+  distributor_name: string;
+  distributor_zone: string | null;
+  distributor_region: string | null;
+  distributor_area: string | null;
+  beat_code: string;
+  beat_name: string;
+  salesman_code: string;
+  salesman_name: string;
+  salesman_employee_code: string | null;
+  salesman_external_salesman_id: string | null;
+  salesman_phone_number: string | null;
+  salesman_zone: string | null;
+  salesman_region: string | null;
+  salesman_area: string | null;
+  external_outlet_code: string | null;
+  outlet_name: string | null;
+  outlet_mobile_number: string | null;
+  outlet_gst_number: string | null;
+  outlet_address_line1: string | null;
+  outlet_address_line2: string | null;
+  outlet_pincode: string | null;
+  outlet_latitude: number | null;
+  outlet_longitude: number | null;
+  outlet_zone: string | null;
+  outlet_region: string | null;
+  outlet_area: string | null;
+  tenant_outlet_code: string;
+  brand_code: string;
+  brand_name: string;
+  sku_code: string;
+  sku_name: string;
+  sku_hsn_code: string | null;
+  sku_mrp: number | null;
+  sku_discount_amount: number | null;
+  sku_discount_percent: number | null;
+  sku_weight: number | null;
+  sku_length_cm: number | null;
+  sku_width_cm: number | null;
+  sku_height_cm: number | null;
+  sku_rate: number | null;
+  sku_sgst_percent: number | null;
+  sku_sgst_amount: number | null;
+  sku_cgst_percent: number | null;
+  sku_cgst_amount: number | null;
+  sku_amount: number | null;
+  sku_igst_percent: number | null;
+  sku_igst_amount: number | null;
+  external_order_id: string | null;
+  external_invoice_no: string | null;
+  external_awb_no: string | null;
+  order_punched_at: string | null;
+  order_sale_date: string | null;
+  order_gross_amount: number | null;
+  order_discount_amount: number | null;
+  order_tax_amount: number | null;
+  order_net_amount: number | null;
+  order_collections_amount: number | null;
+  order_outstanding_amount: number | null;
+  order_decided_margin_amount: number | null;
+  order_remarks: string | null;
+  external_line_id: string;
+  ordered_quantity: number | null;
+  line_rate: number | null;
+  line_discount_amount: number | null;
+  line_discount_percent: number | null;
+  line_sgst_percent: number | null;
+  line_sgst_amount: number | null;
+  line_cgst_percent: number | null;
+  line_cgst_amount: number | null;
+  line_igst_percent: number | null;
+  line_igst_amount: number | null;
+  line_tax_amount: number | null;
+  line_amount: number | null;
+  payment_date: string | null;
+  payment_mode: string | null;
+  payment_amount: number | null;
+  payment_external_ref: string | null;
+};
+
+type RefreshJobSummary = {
+  id: number;
+  status: string;
+  requestedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+};
+
+const IMPORT_STAGE_COLUMNS: Array<keyof NormalizedOrdersBookRow> = [
+  'source_row_number',
+  's_no',
+  'distributor_code',
+  'distributor_name',
+  'distributor_zone',
+  'distributor_region',
+  'distributor_area',
+  'beat_code',
+  'beat_name',
+  'salesman_code',
+  'salesman_name',
+  'salesman_employee_code',
+  'salesman_external_salesman_id',
+  'salesman_phone_number',
+  'salesman_zone',
+  'salesman_region',
+  'salesman_area',
+  'external_outlet_code',
+  'outlet_name',
+  'outlet_mobile_number',
+  'outlet_gst_number',
+  'outlet_address_line1',
+  'outlet_address_line2',
+  'outlet_pincode',
+  'outlet_latitude',
+  'outlet_longitude',
+  'outlet_zone',
+  'outlet_region',
+  'outlet_area',
+  'tenant_outlet_code',
+  'brand_code',
+  'brand_name',
+  'sku_code',
+  'sku_name',
+  'sku_hsn_code',
+  'sku_mrp',
+  'sku_discount_amount',
+  'sku_discount_percent',
+  'sku_weight',
+  'sku_length_cm',
+  'sku_width_cm',
+  'sku_height_cm',
+  'sku_rate',
+  'sku_sgst_percent',
+  'sku_sgst_amount',
+  'sku_cgst_percent',
+  'sku_cgst_amount',
+  'sku_amount',
+  'sku_igst_percent',
+  'sku_igst_amount',
+  'external_order_id',
+  'external_invoice_no',
+  'external_awb_no',
+  'order_punched_at',
+  'order_sale_date',
+  'order_gross_amount',
+  'order_discount_amount',
+  'order_tax_amount',
+  'order_net_amount',
+  'order_collections_amount',
+  'order_outstanding_amount',
+  'order_decided_margin_amount',
+  'order_remarks',
+  'external_line_id',
+  'ordered_quantity',
+  'line_rate',
+  'line_discount_amount',
+  'line_discount_percent',
+  'line_sgst_percent',
+  'line_sgst_amount',
+  'line_cgst_percent',
+  'line_cgst_amount',
+  'line_igst_percent',
+  'line_igst_amount',
+  'line_tax_amount',
+  'line_amount',
+  'payment_date',
+  'payment_mode',
+  'payment_amount',
+  'payment_external_ref'
+];
 
 const IMPORT_DETAIL_ERROR_LIMIT = 100;
 
@@ -1346,6 +1531,15 @@ export class SupeV1Service {
 
     const retailerRows = await runner.query(
       `
+      with retailer_outstanding as (
+        select
+          tenant_outlet_id,
+          coalesce(sum(outstanding_amount), 0) as total_outstanding
+        from sales_orders
+        where tenant_id = $1
+          and tenant_outlet_id is not null
+        group by tenant_outlet_id
+      )
       select
         o.id::text as entity_id,
         o.outlet_name as entity_name,
@@ -1353,12 +1547,7 @@ export class SupeV1Service {
         coalesce(sum(so.net_amount), 0) as revenue_mtd,
         count(distinct so.id) as orders_mtd,
         coalesce(sum(so.outstanding_amount), 0) as mtd_outstanding,
-        coalesce((
-          select sum(so_all.outstanding_amount)
-          from sales_orders so_all
-          where so_all.tenant_id = $1
-            and so_all.tenant_outlet_id = to2.id
-        ), 0) as total_outstanding,
+        coalesce(max(ro.total_outstanding), 0) as total_outstanding,
         max(so.order_sale_date) as last_order_date
       from tenant_outlets to2
       join outlets o on o.id = to2.outlet_id
@@ -1366,8 +1555,9 @@ export class SupeV1Service {
         on so.tenant_outlet_id = to2.id
         and so.tenant_id = $1
         and so.order_sale_date between $2::date and $3::date
+      left join retailer_outstanding ro on ro.tenant_outlet_id = to2.id
       where to2.tenant_id = $1 and to2.active = true
-      group by o.id, o.outlet_name, o.zone, o.region, o.area
+      group by to2.id, o.id, o.outlet_name, o.zone, o.region, o.area
       `,
       [tenantId, range.start, range.end]
     );
@@ -1938,7 +2128,116 @@ export class SupeV1Service {
     return (headerRows[0] || []).map((value) => String(value || '').trim());
   }
 
-  private validateOrdersBook(headers: string[], rows: OrdersBookRow[]): ImportRowError[] {
+  private nullableText(value: string): string | null {
+    return value ? value : null;
+  }
+
+  private normalizeOrdersBookRows(rows: OrdersBookRow[]): NormalizedOrdersBookRow[] {
+    return rows.map((row, index) => {
+      const distributor_code = this.readOrdersBookText(row, 'distributors.distributor_code');
+      const distributor_zone = this.nullableText(this.readOrdersBookText(row, 'distributors.zone'));
+      const distributor_region = this.nullableText(this.readOrdersBookText(row, 'distributors.region'));
+      const distributor_area = this.nullableText(this.readOrdersBookText(row, 'distributors.area'));
+      const salesman_zone =
+        this.nullableText(this.readOrdersBookText(row, 'salesmen.zone')) || distributor_zone;
+      const salesman_region =
+        this.nullableText(this.readOrdersBookText(row, 'salesmen.region')) || distributor_region;
+      const salesman_area =
+        this.nullableText(this.readOrdersBookText(row, 'salesmen.area')) || distributor_area;
+      const outlet_zone =
+        this.nullableText(this.readOrdersBookText(row, 'outlets.zone')) || distributor_zone;
+      const outlet_region =
+        this.nullableText(this.readOrdersBookText(row, 'outlets.region')) || distributor_region;
+      const outlet_area =
+        this.nullableText(this.readOrdersBookText(row, 'outlets.area')) || distributor_area;
+
+      return {
+        source_row_number: index + 2,
+        s_no: this.readOrdersBookText(row, 'S.no') || String(index + 1),
+        distributor_code,
+        distributor_name: this.readOrdersBookText(row, 'distributors.distributor_name') || distributor_code,
+        distributor_zone,
+        distributor_region,
+        distributor_area,
+        beat_code: this.readOrdersBookText(row, 'beats.beat_code'),
+        beat_name: this.readOrdersBookText(row, 'beats.beat_name') || this.readOrdersBookText(row, 'beats.beat_code'),
+        salesman_code: this.readOrdersBookText(row, 'salesmen.salesman_code'),
+        salesman_name:
+          this.readOrdersBookText(row, 'salesmen.salesman_name') || this.readOrdersBookText(row, 'salesmen.salesman_code'),
+        salesman_employee_code: this.nullableText(this.readOrdersBookText(row, 'salesmen.employee_code')),
+        salesman_external_salesman_id: this.nullableText(this.readOrdersBookText(row, 'salesmen.external_salesman_id')),
+        salesman_phone_number: normalizePhone(this.readOrdersBookText(row, 'salesmen.phone_number')) || null,
+        salesman_zone,
+        salesman_region,
+        salesman_area,
+        external_outlet_code: this.nullableText(this.readOrdersBookText(row, 'outlets.external_outlet_code')),
+        outlet_name: this.nullableText(this.readOrdersBookText(row, 'outlets.outlet_name')),
+        outlet_mobile_number: normalizePhone(this.readOrdersBookText(row, 'outlets.mobile_number')) || null,
+        outlet_gst_number: this.nullableText(this.readOrdersBookText(row, 'outlets.gst_number')),
+        outlet_address_line1: this.nullableText(this.readOrdersBookText(row, 'outlets.address_line1')),
+        outlet_address_line2: this.nullableText(this.readOrdersBookText(row, 'outlets.address_line2')),
+        outlet_pincode: this.nullableText(this.readOrdersBookText(row, 'outlets.pincode')),
+        outlet_latitude: this.readOrdersBookNumber(row, 'outlets.latitude'),
+        outlet_longitude: this.readOrdersBookNumber(row, 'outlets.longitude'),
+        outlet_zone,
+        outlet_region,
+        outlet_area,
+        tenant_outlet_code: this.readOrdersBookText(row, 'tenant_outlets.tenant_outlet_code'),
+        brand_code: this.readOrdersBookText(row, 'brands.brand_code'),
+        brand_name: this.readOrdersBookText(row, 'brands.brand_name') || this.readOrdersBookText(row, 'brands.brand_code'),
+        sku_code: this.readOrdersBookText(row, 'skus.sku_code'),
+        sku_name: this.readOrdersBookText(row, 'skus.name') || this.readOrdersBookText(row, 'skus.sku_code'),
+        sku_hsn_code: this.nullableText(this.readOrdersBookText(row, 'skus.hsn_code')),
+        sku_mrp: this.readOrdersBookNumber(row, 'skus.mrp'),
+        sku_discount_amount: this.readOrdersBookNumber(row, 'skus.discount_amount'),
+        sku_discount_percent: this.readOrdersBookNumber(row, 'skus.discount_percent'),
+        sku_weight: this.readOrdersBookNumber(row, 'skus.weight'),
+        sku_length_cm: this.readOrdersBookNumber(row, 'skus.length_cm'),
+        sku_width_cm: this.readOrdersBookNumber(row, 'skus.width_cm'),
+        sku_height_cm: this.readOrdersBookNumber(row, 'skus.height_cm'),
+        sku_rate: this.readOrdersBookNumber(row, 'skus.rate'),
+        sku_sgst_percent: this.readOrdersBookNumber(row, 'skus.sgst_percent'),
+        sku_sgst_amount: this.readOrdersBookNumber(row, 'skus.sgst_amount'),
+        sku_cgst_percent: this.readOrdersBookNumber(row, 'skus.cgst_percent'),
+        sku_cgst_amount: this.readOrdersBookNumber(row, 'skus.cgst_amount'),
+        sku_amount: this.readOrdersBookNumber(row, 'skus.amount'),
+        sku_igst_percent: this.readOrdersBookNumber(row, 'skus.igst_percent'),
+        sku_igst_amount: this.readOrdersBookNumber(row, 'skus.igst_amount'),
+        external_order_id: this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_order_id')),
+        external_invoice_no: this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_invoice_no')),
+        external_awb_no: this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_awb_no')),
+        order_punched_at: this.readOrdersBookTimestamp(row, 'sales_orders.order_punched_at'),
+        order_sale_date: this.readOrdersBookDate(row, 'sales_orders.order_sale_date'),
+        order_gross_amount: this.readOrdersBookNumber(row, 'sales_orders.gross_amount'),
+        order_discount_amount: this.readOrdersBookNumber(row, 'sales_orders.discount_amount'),
+        order_tax_amount: this.readOrdersBookNumber(row, 'sales_orders.tax_amount'),
+        order_net_amount: this.readOrdersBookNumber(row, 'sales_orders.net_amount'),
+        order_collections_amount: this.readOrdersBookNumber(row, 'sales_orders.collections_amount'),
+        order_outstanding_amount: this.readOrdersBookNumber(row, 'sales_orders.outstanding_amount'),
+        order_decided_margin_amount: this.readOrdersBookNumber(row, 'sales_orders.decided_margin_amount'),
+        order_remarks: this.nullableText(this.readOrdersBookText(row, 'sales_orders.remarks')),
+        external_line_id: this.readOrdersBookText(row, 'sales_order_items.external_line_id'),
+        ordered_quantity: this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
+        line_rate: this.readOrdersBookNumber(row, 'sales_order_items.rate'),
+        line_discount_amount: this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
+        line_discount_percent: this.readOrdersBookNumber(row, 'sales_order_items.discount_percent'),
+        line_sgst_percent: this.readOrdersBookNumber(row, 'sales_order_items.sgst_percent'),
+        line_sgst_amount: this.readOrdersBookNumber(row, 'sales_order_items.sgst_amount'),
+        line_cgst_percent: this.readOrdersBookNumber(row, 'sales_order_items.cgst_percent'),
+        line_cgst_amount: this.readOrdersBookNumber(row, 'sales_order_items.cgst_amount'),
+        line_igst_percent: this.readOrdersBookNumber(row, 'sales_order_items.igst_percent'),
+        line_igst_amount: this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
+        line_tax_amount: this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
+        line_amount: this.readOrdersBookNumber(row, 'sales_order_items.amount'),
+        payment_date: this.readOrdersBookDate(row, 'order_payments.payment_date'),
+        payment_mode: this.nullableText(this.readOrdersBookText(row, 'order_payments.payment_mode')),
+        payment_amount: this.readOrdersBookNumber(row, 'order_payments.amount'),
+        payment_external_ref: this.nullableText(this.readOrdersBookText(row, 'order_payments.external_ref'))
+      };
+    });
+  }
+
+  private validateOrdersBook(headers: string[], rows: NormalizedOrdersBookRow[]): ImportRowError[] {
     const errors: ImportRowError[] = [];
     if (!rows.length) {
       errors.push({
@@ -1967,21 +2266,21 @@ export class SupeV1Service {
     const seenLineKeys = new Set<string>();
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
-      const rowNumber = index + 2;
-      const sNo = this.readOrdersBookText(row, 'S.no') || String(index + 1);
-      const requiredTextColumns: OrdersBookHeader[] = [
-        'distributors.distributor_code',
-        'beats.beat_code',
-        'salesmen.salesman_code',
-        'outlets.external_outlet_code',
-        'tenant_outlets.tenant_outlet_code',
-        'brands.brand_code',
-        'skus.sku_code',
-        'sales_order_items.external_line_id'
+      const rowNumber = row.source_row_number;
+      const sNo = row.s_no || String(index + 1);
+      const requiredTextColumns: Array<{ field: keyof NormalizedOrdersBookRow; column: string }> = [
+        { field: 'distributor_code', column: 'distributors.distributor_code' },
+        { field: 'beat_code', column: 'beats.beat_code' },
+        { field: 'salesman_code', column: 'salesmen.salesman_code' },
+        { field: 'external_outlet_code', column: 'outlets.external_outlet_code' },
+        { field: 'tenant_outlet_code', column: 'tenant_outlets.tenant_outlet_code' },
+        { field: 'brand_code', column: 'brands.brand_code' },
+        { field: 'sku_code', column: 'skus.sku_code' },
+        { field: 'external_line_id', column: 'sales_order_items.external_line_id' }
       ];
 
-      for (const column of requiredTextColumns) {
-        if (!this.readOrdersBookText(row, column)) {
+      for (const { field, column } of requiredTextColumns) {
+        if (!String((row as Record<string, unknown>)[field] || '').trim()) {
           errors.push({
             sNo,
             rowNumber,
@@ -1991,7 +2290,7 @@ export class SupeV1Service {
         }
       }
 
-      const quantity = this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity');
+      const quantity = row.ordered_quantity;
       if (quantity === null || quantity <= 0) {
         errors.push({
           sNo,
@@ -2001,8 +2300,8 @@ export class SupeV1Service {
         });
       }
 
-      const invoiceNo = this.readOrdersBookText(row, 'sales_orders.external_invoice_no');
-      const orderId = this.readOrdersBookText(row, 'sales_orders.external_order_id');
+      const invoiceNo = row.external_invoice_no || '';
+      const orderId = row.external_order_id || '';
       if (!invoiceNo && !orderId) {
         errors.push({
           sNo,
@@ -2012,7 +2311,7 @@ export class SupeV1Service {
         });
       }
 
-      const lineId = this.readOrdersBookText(row, 'sales_order_items.external_line_id');
+      const lineId = row.external_line_id;
       if (lineId) {
         const orderIdentity = invoiceNo ? `INV:${invoiceNo}` : `ORD:${orderId}`;
         const lineKey = `${orderIdentity}|${lineId}`;
@@ -2186,6 +2485,33 @@ export class SupeV1Service {
     return this.normalizeReturnedRows(result).length;
   }
 
+  private importBatchBaseSelect(): string {
+    return `
+      select
+        ib.*,
+        rj.id as refresh_job_id,
+        rj.status as refresh_status,
+        rj.requested_at as refresh_requested_at,
+        rj.started_at as refresh_started_at,
+        rj.completed_at as refresh_completed_at,
+        rj.error_text as refresh_error
+      from import_batches ib
+      left join tenant_refresh_job_imports trji on trji.import_batch_id = ib.id
+      left join tenant_refresh_jobs rj on rj.id = trji.refresh_job_id
+    `;
+  }
+
+  private refreshJobSummaryFromRow(row: any): RefreshJobSummary {
+    return {
+      id: Number(row.id),
+      status: String(row.status),
+      requestedAt: row.requested_at || null,
+      startedAt: row.started_at || null,
+      completedAt: row.completed_at || null,
+      error: row.error_text || null
+    };
+  }
+
   private importBatchSummaryFromRow(row: any): ImportBatchSummary {
     return {
       id: Number(row.id),
@@ -2205,13 +2531,19 @@ export class SupeV1Service {
       startedAt: row.started_at || null,
       completedAt: row.completed_at || null,
       processedBy: row.processed_by || null,
+      refreshJobId: row.refresh_job_id ? Number(row.refresh_job_id) : null,
+      refreshStatus: row.refresh_status || null,
+      refreshRequestedAt: row.refresh_requested_at || null,
+      refreshStartedAt: row.refresh_started_at || null,
+      refreshCompletedAt: row.refresh_completed_at || null,
+      refreshError: row.refresh_error || null,
       importedAt: row.imported_at,
       createdAt: row.created_at
     };
   }
 
   private async getImportBatchById(importId: number): Promise<ImportBatchSummary | null> {
-    const rows = await this.db.query(`select * from import_batches where id = $1 limit 1`, [importId]);
+    const rows = await this.db.query(`${this.importBatchBaseSelect()} where ib.id = $1 limit 1`, [importId]);
     if (!rows.length) {
       return null;
     }
@@ -2240,593 +2572,1276 @@ export class SupeV1Service {
     }));
   }
 
-  private async persistOrdersBookRows(tenantId: number, batchId: number, rows: OrdersBookRow[]): Promise<void> {
+  private stageTableName(batchId: number): string {
+    return `temp_import_rows_${batchId}`;
+  }
+
+  private newOutletMapTableName(batchId: number): string {
+    return `temp_new_outlet_map_${batchId}`;
+  }
+
+  private csvValue(value: unknown): string {
+    if (value === null || value === undefined) {
+      return '\\N';
+    }
+    const stringValue = String(value);
+    if (/["\n\r,]/.test(stringValue) || stringValue === '\\N') {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  }
+
+  private csvLineForImportStage(row: NormalizedOrdersBookRow): string {
+    return `${IMPORT_STAGE_COLUMNS.map((column) => this.csvValue(row[column])).join(',')}\n`;
+  }
+
+  protected async copyRowsIntoImportStage(
+    runner: QueryRunner,
+    stageTable: string,
+    rows: NormalizedOrdersBookRow[]
+  ): Promise<void> {
+    const client = (runner as any).databaseConnection;
+    if (!client?.query) {
+      throw new Error('Postgres copy connection is unavailable');
+    }
+
+    const copySql = `copy ${stageTable} (${IMPORT_STAGE_COLUMNS.join(', ')}) from stdin with (format csv, null '\\N')`;
+    async function* csvLines(service: SupeV1Service) {
+      for (const row of rows) {
+        yield service.csvLineForImportStage(row);
+      }
+    }
+
+    await pipeline(Readable.from(csvLines(this)), client.query(copyFrom(copySql)));
+  }
+
+  private async createImportStageTable(runner: QueryRunner, stageTable: string): Promise<void> {
+    await runner.query(
+      `
+      create temp table ${stageTable} (
+        source_row_number int not null,
+        s_no text not null,
+        distributor_code text not null,
+        distributor_name text not null,
+        distributor_zone text,
+        distributor_region text,
+        distributor_area text,
+        beat_code text not null,
+        beat_name text not null,
+        salesman_code text not null,
+        salesman_name text not null,
+        salesman_employee_code text,
+        salesman_external_salesman_id text,
+        salesman_phone_number text,
+        salesman_zone text,
+        salesman_region text,
+        salesman_area text,
+        external_outlet_code text,
+        outlet_name text,
+        outlet_mobile_number text,
+        outlet_gst_number text,
+        outlet_address_line1 text,
+        outlet_address_line2 text,
+        outlet_pincode text,
+        outlet_latitude numeric(10,7),
+        outlet_longitude numeric(10,7),
+        outlet_zone text,
+        outlet_region text,
+        outlet_area text,
+        tenant_outlet_code text not null,
+        brand_code text not null,
+        brand_name text not null,
+        sku_code text not null,
+        sku_name text not null,
+        sku_hsn_code text,
+        sku_mrp numeric(12,2),
+        sku_discount_amount numeric(12,2),
+        sku_discount_percent numeric(7,2),
+        sku_weight numeric(12,3),
+        sku_length_cm numeric(10,2),
+        sku_width_cm numeric(10,2),
+        sku_height_cm numeric(10,2),
+        sku_rate numeric(12,2),
+        sku_sgst_percent numeric(7,2),
+        sku_sgst_amount numeric(12,2),
+        sku_cgst_percent numeric(7,2),
+        sku_cgst_amount numeric(12,2),
+        sku_amount numeric(12,2),
+        sku_igst_percent numeric(7,2),
+        sku_igst_amount numeric(12,2),
+        external_order_id text,
+        external_invoice_no text,
+        external_awb_no text,
+        order_punched_at timestamptz,
+        order_sale_date date,
+        order_gross_amount numeric(14,2),
+        order_discount_amount numeric(14,2),
+        order_tax_amount numeric(14,2),
+        order_net_amount numeric(14,2),
+        order_collections_amount numeric(14,2),
+        order_outstanding_amount numeric(14,2),
+        order_decided_margin_amount numeric(14,2),
+        order_remarks text,
+        external_line_id text not null,
+        ordered_quantity numeric(12,3) not null,
+        line_rate numeric(12,2),
+        line_discount_amount numeric(12,2),
+        line_discount_percent numeric(7,2),
+        line_sgst_percent numeric(7,2),
+        line_sgst_amount numeric(12,2),
+        line_cgst_percent numeric(7,2),
+        line_cgst_amount numeric(12,2),
+        line_igst_percent numeric(7,2),
+        line_igst_amount numeric(12,2),
+        line_tax_amount numeric(12,2),
+        line_amount numeric(12,2),
+        payment_date date,
+        payment_mode text,
+        payment_amount numeric(14,2),
+        payment_external_ref text
+      ) on commit drop
+      `
+    );
+  }
+
+  private orderIdentitySql(alias: string): string {
+    return `case when ${alias}.external_invoice_no is not null then 'INV:' || ${alias}.external_invoice_no else 'ORD:' || ${alias}.external_order_id end`;
+  }
+
+  private async upsertDistributorsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.distributor_code)
+          s.distributor_code,
+          s.distributor_name,
+          s.distributor_zone,
+          s.distributor_region,
+          s.distributor_area
+        from ${stageTable} s
+        order by s.distributor_code, s.source_row_number desc
+      )
+      insert into distributors (tenant_id, distributor_code, distributor_name, zone, region, area, active)
+      select $1, latest.distributor_code, latest.distributor_name, latest.distributor_zone, latest.distributor_region, latest.distributor_area, true
+      from latest
+      on conflict (tenant_id, distributor_code)
+      do update set
+        distributor_name = excluded.distributor_name,
+        zone = excluded.zone,
+        region = excluded.region,
+        area = excluded.area,
+        active = true,
+        updated_at = now()
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertBeatsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.beat_code)
+          s.beat_code,
+          s.beat_name,
+          s.distributor_code,
+          s.distributor_zone,
+          s.distributor_region,
+          s.distributor_area
+        from ${stageTable} s
+        order by s.beat_code, s.source_row_number desc
+      )
+      insert into beats (tenant_id, beat_code, beat_name, distributor_id, zone, region, area, active)
+      select
+        $1,
+        latest.beat_code,
+        latest.beat_name,
+        d.id,
+        latest.distributor_zone,
+        latest.distributor_region,
+        latest.distributor_area,
+        true
+      from latest
+      join distributors d on d.tenant_id = $1 and d.distributor_code = latest.distributor_code
+      on conflict (tenant_id, beat_code)
+      do update set
+        beat_name = excluded.beat_name,
+        distributor_id = excluded.distributor_id,
+        zone = excluded.zone,
+        region = excluded.region,
+        area = excluded.area,
+        active = true,
+        updated_at = now()
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertSalesmenFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.salesman_code)
+          s.salesman_code,
+          s.salesman_name,
+          s.salesman_employee_code,
+          s.salesman_external_salesman_id,
+          s.salesman_phone_number,
+          s.salesman_zone,
+          s.salesman_region,
+          s.salesman_area,
+          s.distributor_code
+        from ${stageTable} s
+        order by s.salesman_code, s.source_row_number desc
+      )
+      insert into salesmen (
+        tenant_id,
+        salesman_code,
+        salesman_name,
+        employee_code,
+        external_salesman_id,
+        phone_number,
+        zone,
+        region,
+        area,
+        distributor_id,
+        active
+      )
+      select
+        $1,
+        latest.salesman_code,
+        latest.salesman_name,
+        latest.salesman_employee_code,
+        latest.salesman_external_salesman_id,
+        latest.salesman_phone_number,
+        latest.salesman_zone,
+        latest.salesman_region,
+        latest.salesman_area,
+        d.id,
+        true
+      from latest
+      join distributors d on d.tenant_id = $1 and d.distributor_code = latest.distributor_code
+      on conflict (tenant_id, salesman_code)
+      do update set
+        salesman_name = excluded.salesman_name,
+        employee_code = excluded.employee_code,
+        external_salesman_id = excluded.external_salesman_id,
+        phone_number = excluded.phone_number,
+        zone = excluded.zone,
+        region = excluded.region,
+        area = excluded.area,
+        distributor_id = excluded.distributor_id,
+        active = true,
+        updated_at = now()
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertOutletsAndTenantOutletsFromStage(
+    runner: QueryRunner,
+    stageTable: string,
+    batchId: number,
+    tenantId: number
+  ): Promise<void> {
+    const newOutletMapTable = this.newOutletMapTableName(batchId);
+    await runner.query(
+      `
+      create temp table ${newOutletMapTable} (
+        tenant_outlet_code text primary key,
+        outlet_id bigint not null
+      ) on commit drop
+      `
+    );
+
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.tenant_outlet_code)
+          s.tenant_outlet_code,
+          s.external_outlet_code,
+          s.outlet_name,
+          coalesce(s.outlet_name, s.external_outlet_code, s.tenant_outlet_code) as insert_outlet_name,
+          s.outlet_mobile_number,
+          s.outlet_gst_number,
+          s.outlet_address_line1,
+          s.outlet_address_line2,
+          s.outlet_pincode,
+          s.outlet_latitude,
+          s.outlet_longitude,
+          s.outlet_zone,
+          s.outlet_region,
+          s.outlet_area
+        from ${stageTable} s
+        order by s.tenant_outlet_code, s.source_row_number desc
+      ),
+      missing as (
+        select
+          latest.*,
+          nextval(pg_get_serial_sequence('outlets', 'id')) as outlet_id
+        from latest
+        where not exists (
+          select 1
+          from tenant_outlets to2
+          where to2.tenant_id = $1 and to2.tenant_outlet_code = latest.tenant_outlet_code
+        )
+      ),
+      inserted as (
+        insert into outlets (
+          id,
+          external_outlet_code,
+          outlet_name,
+          mobile_number,
+          gst_number,
+          address_line1,
+          address_line2,
+          pincode,
+          latitude,
+          longitude,
+          zone,
+          region,
+          area,
+          active
+        )
+        select
+          missing.outlet_id,
+          missing.external_outlet_code,
+          missing.insert_outlet_name,
+          missing.outlet_mobile_number,
+          missing.outlet_gst_number,
+          missing.outlet_address_line1,
+          missing.outlet_address_line2,
+          missing.outlet_pincode,
+          missing.outlet_latitude,
+          missing.outlet_longitude,
+          missing.outlet_zone,
+          missing.outlet_region,
+          missing.outlet_area,
+          true
+        from missing
+        returning id
+      )
+      insert into ${newOutletMapTable} (tenant_outlet_code, outlet_id)
+      select missing.tenant_outlet_code, missing.outlet_id
+      from missing
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.tenant_outlet_code)
+          s.tenant_outlet_code,
+          s.external_outlet_code,
+          s.outlet_name,
+          s.outlet_mobile_number,
+          s.outlet_gst_number,
+          s.outlet_address_line1,
+          s.outlet_address_line2,
+          s.outlet_pincode,
+          s.outlet_latitude,
+          s.outlet_longitude,
+          s.outlet_zone,
+          s.outlet_region,
+          s.outlet_area
+        from ${stageTable} s
+        order by s.tenant_outlet_code, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.*,
+          coalesce(to2.outlet_id, nom.outlet_id) as outlet_id
+        from latest
+        left join tenant_outlets to2 on to2.tenant_id = $1 and to2.tenant_outlet_code = latest.tenant_outlet_code
+        left join ${newOutletMapTable} nom on nom.tenant_outlet_code = latest.tenant_outlet_code
+      )
+      update outlets o
+      set external_outlet_code = resolved.external_outlet_code,
+          outlet_name = resolved.outlet_name,
+          mobile_number = resolved.outlet_mobile_number,
+          gst_number = resolved.outlet_gst_number,
+          address_line1 = resolved.outlet_address_line1,
+          address_line2 = resolved.outlet_address_line2,
+          pincode = resolved.outlet_pincode,
+          latitude = resolved.outlet_latitude,
+          longitude = resolved.outlet_longitude,
+          zone = resolved.outlet_zone,
+          region = resolved.outlet_region,
+          area = resolved.outlet_area,
+          active = true,
+          updated_at = now()
+      from resolved
+      where o.id = resolved.outlet_id
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.tenant_outlet_code)
+          s.tenant_outlet_code,
+          s.salesman_code,
+          s.distributor_code,
+          s.order_sale_date
+        from ${stageTable} s
+        order by s.tenant_outlet_code, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.tenant_outlet_code,
+          coalesce(to_existing.outlet_id, nom.outlet_id) as outlet_id,
+          sm.id as salesman_id,
+          d.id as distributor_id,
+          latest.order_sale_date
+        from latest
+        left join tenant_outlets to_existing on to_existing.tenant_id = $1 and to_existing.tenant_outlet_code = latest.tenant_outlet_code
+        left join ${newOutletMapTable} nom on nom.tenant_outlet_code = latest.tenant_outlet_code
+        join salesmen sm on sm.tenant_id = $1 and sm.salesman_code = latest.salesman_code
+        join distributors d on d.tenant_id = $1 and d.distributor_code = latest.distributor_code
+      )
+      insert into tenant_outlets (
+        tenant_id,
+        outlet_id,
+        tenant_outlet_code,
+        salesman_id,
+        distributor_id,
+        servicing_status,
+        active,
+        first_order_date,
+        last_order_date
+      )
+      select
+        $1,
+        resolved.outlet_id,
+        resolved.tenant_outlet_code,
+        resolved.salesman_id,
+        resolved.distributor_id,
+        'active',
+        true,
+        resolved.order_sale_date,
+        resolved.order_sale_date
+      from resolved
+      on conflict (tenant_id, tenant_outlet_code)
+      do update set
+        outlet_id = excluded.outlet_id,
+        salesman_id = excluded.salesman_id,
+        distributor_id = excluded.distributor_id,
+        servicing_status = coalesce(excluded.servicing_status, tenant_outlets.servicing_status),
+        active = true,
+        first_order_date = coalesce(tenant_outlets.first_order_date, excluded.first_order_date),
+        last_order_date = coalesce(excluded.last_order_date, tenant_outlets.last_order_date),
+        updated_at = now()
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.tenant_outlet_code)
+          s.tenant_outlet_code,
+          s.beat_code
+        from ${stageTable} s
+        order by s.tenant_outlet_code, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          to2.outlet_id,
+          b.id as beat_id
+        from latest
+        join tenant_outlets to2 on to2.tenant_id = $1 and to2.tenant_outlet_code = latest.tenant_outlet_code
+        join beats b on b.tenant_id = $1 and b.beat_code = latest.beat_code
+      )
+      update beat_outlets bo
+      set active = false,
+          removed_at = now(),
+          removed_by = 'ingestion',
+          updated_at = now()
+      from resolved
+      where bo.tenant_id = $1
+        and bo.outlet_id = resolved.outlet_id
+        and bo.beat_id <> resolved.beat_id
+        and bo.active = true
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.tenant_outlet_code)
+          s.tenant_outlet_code,
+          s.beat_code,
+          s.order_punched_at
+        from ${stageTable} s
+        order by s.tenant_outlet_code, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          to2.outlet_id,
+          b.id as beat_id,
+          latest.order_punched_at
+        from latest
+        join tenant_outlets to2 on to2.tenant_id = $1 and to2.tenant_outlet_code = latest.tenant_outlet_code
+        join beats b on b.tenant_id = $1 and b.beat_code = latest.beat_code
+      )
+      insert into beat_outlets (tenant_id, beat_id, outlet_id, active, assigned_at, assigned_by, removed_at, removed_by)
+      select
+        $1,
+        resolved.beat_id,
+        resolved.outlet_id,
+        true,
+        coalesce(resolved.order_punched_at, now()),
+        'ingestion',
+        null,
+        null
+      from resolved
+      on conflict (tenant_id, beat_id, outlet_id)
+      do update set
+        active = true,
+        removed_at = null,
+        removed_by = null,
+        assigned_at = coalesce(beat_outlets.assigned_at, excluded.assigned_at),
+        updated_at = now()
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertBrandsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    await runner.query(
+      `
+      with latest_by_code as (
+        select distinct on (s.brand_code)
+          s.brand_code,
+          s.brand_name
+        from ${stageTable} s
+        order by s.brand_code, s.source_row_number desc
+      )
+      update brands b
+      set brand_code = latest_by_code.brand_code,
+          brand_name = latest_by_code.brand_name,
+          active = true,
+          updated_at = now()
+      from latest_by_code
+      where b.tenant_id = $1
+        and b.brand_code = latest_by_code.brand_code
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest_by_code as (
+        select distinct on (s.brand_code)
+          s.brand_code,
+          s.brand_name
+        from ${stageTable} s
+        order by s.brand_code, s.source_row_number desc
+      ),
+      unmatched_code as (
+        select latest_by_code.*
+        from latest_by_code
+        where not exists (
+          select 1
+          from brands b
+          where b.tenant_id = $1 and b.brand_code = latest_by_code.brand_code
+        )
+      ),
+      latest_by_name as (
+        select distinct on (lower(unmatched_code.brand_name))
+          unmatched_code.brand_code,
+          unmatched_code.brand_name
+        from unmatched_code
+        order by lower(unmatched_code.brand_name), unmatched_code.brand_code
+      )
+      update brands b
+      set brand_code = latest_by_name.brand_code,
+          brand_name = latest_by_name.brand_name,
+          active = true,
+          updated_at = now()
+      from latest_by_name
+      where b.tenant_id = $1
+        and lower(b.brand_name) = lower(latest_by_name.brand_name)
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest_by_code as (
+        select distinct on (s.brand_code)
+          s.brand_code,
+          s.brand_name
+        from ${stageTable} s
+        order by s.brand_code, s.source_row_number desc
+      )
+      insert into brands (tenant_id, brand_code, brand_name, active)
+      select $1, latest_by_code.brand_code, latest_by_code.brand_name, true
+      from latest_by_code
+      where not exists (
+              select 1
+              from brands b
+              where b.tenant_id = $1 and b.brand_code = latest_by_code.brand_code
+            )
+        and not exists (
+              select 1
+              from brands b
+              where b.tenant_id = $1 and lower(b.brand_name) = lower(latest_by_code.brand_name)
+            )
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertSkusFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (s.sku_code)
+          s.*
+        from ${stageTable} s
+        order by s.sku_code, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.*,
+          coalesce(bc.id, bn.id) as brand_id
+        from latest
+        left join brands bc on bc.tenant_id = $1 and bc.brand_code = latest.brand_code
+        left join brands bn on bn.tenant_id = $1 and bc.id is null and lower(bn.brand_name) = lower(latest.brand_name)
+      )
+      insert into skus (
+        tenant_id,
+        sku_code,
+        name,
+        brand_id,
+        hsn_code,
+        mrp,
+        discount_amount,
+        discount_percent,
+        rate,
+        sgst_percent,
+        sgst_amount,
+        cgst_percent,
+        cgst_amount,
+        amount,
+        weight,
+        length_cm,
+        width_cm,
+        height_cm,
+        igst_percent,
+        igst_amount,
+        active
+      )
+      select
+        $1,
+        resolved.sku_code,
+        resolved.sku_name,
+        resolved.brand_id,
+        resolved.sku_hsn_code,
+        resolved.sku_mrp,
+        resolved.sku_discount_amount,
+        resolved.sku_discount_percent,
+        resolved.sku_rate,
+        resolved.sku_sgst_percent,
+        resolved.sku_sgst_amount,
+        resolved.sku_cgst_percent,
+        resolved.sku_cgst_amount,
+        resolved.sku_amount,
+        resolved.sku_weight,
+        resolved.sku_length_cm,
+        resolved.sku_width_cm,
+        resolved.sku_height_cm,
+        resolved.sku_igst_percent,
+        resolved.sku_igst_amount,
+        true
+      from resolved
+      on conflict (tenant_id, sku_code)
+      do update set
+        name = excluded.name,
+        brand_id = excluded.brand_id,
+        hsn_code = excluded.hsn_code,
+        mrp = excluded.mrp,
+        discount_amount = excluded.discount_amount,
+        discount_percent = excluded.discount_percent,
+        rate = excluded.rate,
+        sgst_percent = excluded.sgst_percent,
+        sgst_amount = excluded.sgst_amount,
+        cgst_percent = excluded.cgst_percent,
+        cgst_amount = excluded.cgst_amount,
+        amount = excluded.amount,
+        weight = excluded.weight,
+        length_cm = excluded.length_cm,
+        width_cm = excluded.width_cm,
+        height_cm = excluded.height_cm,
+        igst_percent = excluded.igst_percent,
+        igst_amount = excluded.igst_amount,
+        active = true,
+        updated_at = now()
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertSalesOrdersFromStage(runner: QueryRunner, stageTable: string, tenantId: number, batchId: number): Promise<void> {
+    const orderIdentity = this.orderIdentitySql('s');
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (${orderIdentity})
+          ${orderIdentity} as order_identity,
+          s.*
+        from ${stageTable} s
+        order by ${orderIdentity}, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.*,
+          o.id as outlet_id,
+          to2.id as tenant_outlet_id,
+          b.id as beat_id,
+          sm.id as salesman_id,
+          d.id as distributor_id
+        from latest
+        join tenant_outlets to2 on to2.tenant_id = $1 and to2.tenant_outlet_code = latest.tenant_outlet_code
+        join outlets o on o.id = to2.outlet_id
+        join beats b on b.tenant_id = $1 and b.beat_code = latest.beat_code
+        join salesmen sm on sm.tenant_id = $1 and sm.salesman_code = latest.salesman_code
+        join distributors d on d.tenant_id = $1 and d.distributor_code = latest.distributor_code
+      ),
+      updated as (
+        update sales_orders so
+        set import_batch_id = $2,
+            external_order_id = resolved.external_order_id,
+            external_invoice_no = resolved.external_invoice_no,
+            external_awb_no = resolved.external_awb_no,
+            order_punched_at = resolved.order_punched_at,
+            order_sale_date = resolved.order_sale_date,
+            outlet_id = resolved.outlet_id,
+            tenant_outlet_id = resolved.tenant_outlet_id,
+            beat_id = resolved.beat_id,
+            salesman_id = resolved.salesman_id,
+            distributor_id = resolved.distributor_id,
+            gross_amount = resolved.order_gross_amount,
+            discount_amount = resolved.order_discount_amount,
+            tax_amount = resolved.order_tax_amount,
+            net_amount = resolved.order_net_amount,
+            collections_amount = resolved.order_collections_amount,
+            outstanding_amount = resolved.order_outstanding_amount,
+            decided_margin_amount = resolved.order_decided_margin_amount,
+            remarks = resolved.order_remarks,
+            updated_at = now()
+        from resolved
+        where so.tenant_id = $1
+          and (
+            (resolved.external_invoice_no is not null and so.external_invoice_no = resolved.external_invoice_no)
+            or
+            (resolved.external_invoice_no is null and so.external_order_id = resolved.external_order_id)
+          )
+        returning so.id
+      )
+      insert into sales_orders (
+        tenant_id,
+        import_batch_id,
+        external_order_id,
+        external_invoice_no,
+        external_awb_no,
+        order_punched_at,
+        order_sale_date,
+        outlet_id,
+        tenant_outlet_id,
+        beat_id,
+        salesman_id,
+        distributor_id,
+        gross_amount,
+        discount_amount,
+        tax_amount,
+        net_amount,
+        collections_amount,
+        outstanding_amount,
+        decided_margin_amount,
+        remarks
+      )
+      select
+        $1,
+        $2,
+        resolved.external_order_id,
+        resolved.external_invoice_no,
+        resolved.external_awb_no,
+        resolved.order_punched_at,
+        resolved.order_sale_date,
+        resolved.outlet_id,
+        resolved.tenant_outlet_id,
+        resolved.beat_id,
+        resolved.salesman_id,
+        resolved.distributor_id,
+        resolved.order_gross_amount,
+        resolved.order_discount_amount,
+        resolved.order_tax_amount,
+        resolved.order_net_amount,
+        resolved.order_collections_amount,
+        resolved.order_outstanding_amount,
+        resolved.order_decided_margin_amount,
+        resolved.order_remarks
+      from resolved
+      where not exists (
+        select 1
+        from sales_orders so
+        where so.tenant_id = $1
+          and (
+            (resolved.external_invoice_no is not null and so.external_invoice_no = resolved.external_invoice_no)
+            or
+            (resolved.external_invoice_no is null and so.external_order_id = resolved.external_order_id)
+          )
+      )
+      `,
+      [tenantId, batchId]
+    );
+  }
+
+  private async upsertSalesOrderItemsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    const orderIdentity = this.orderIdentitySql('s');
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (${orderIdentity}, s.external_line_id)
+          ${orderIdentity} as order_identity,
+          s.*
+        from ${stageTable} s
+        order by ${orderIdentity}, s.external_line_id, s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.*,
+          so.id as sales_order_id,
+          sku.id as sku_id
+        from latest
+        join sales_orders so
+          on so.tenant_id = $1
+         and (
+           (latest.external_invoice_no is not null and so.external_invoice_no = latest.external_invoice_no)
+           or
+           (latest.external_invoice_no is null and so.external_order_id = latest.external_order_id)
+         )
+        join skus sku on sku.tenant_id = $1 and sku.sku_code = latest.sku_code
+      )
+      insert into sales_order_items (
+        sales_order_id,
+        sku_id,
+        external_line_id,
+        ordered_quantity,
+        rate,
+        discount_amount,
+        discount_percent,
+        sgst_percent,
+        sgst_amount,
+        cgst_percent,
+        cgst_amount,
+        igst_percent,
+        igst_amount,
+        tax_amount,
+        amount
+      )
+      select
+        resolved.sales_order_id,
+        resolved.sku_id,
+        resolved.external_line_id,
+        resolved.ordered_quantity,
+        resolved.line_rate,
+        resolved.line_discount_amount,
+        resolved.line_discount_percent,
+        resolved.line_sgst_percent,
+        resolved.line_sgst_amount,
+        resolved.line_cgst_percent,
+        resolved.line_cgst_amount,
+        resolved.line_igst_percent,
+        resolved.line_igst_amount,
+        resolved.line_tax_amount,
+        resolved.line_amount
+      from resolved
+      on conflict (sales_order_id, external_line_id) where external_line_id is not null
+      do update set
+        sku_id = excluded.sku_id,
+        ordered_quantity = excluded.ordered_quantity,
+        rate = excluded.rate,
+        discount_amount = excluded.discount_amount,
+        discount_percent = excluded.discount_percent,
+        sgst_percent = excluded.sgst_percent,
+        sgst_amount = excluded.sgst_amount,
+        cgst_percent = excluded.cgst_percent,
+        cgst_amount = excluded.cgst_amount,
+        igst_percent = excluded.igst_percent,
+        igst_amount = excluded.igst_amount,
+        tax_amount = excluded.tax_amount,
+        amount = excluded.amount
+      `,
+      [tenantId]
+    );
+  }
+
+  private async upsertOrderPaymentsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
+    const orderIdentity = this.orderIdentitySql('s');
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (
+          case
+            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
+            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
+          end
+        )
+          ${orderIdentity} as order_identity,
+          s.*
+        from ${stageTable} s
+        where s.payment_amount is not null and s.payment_amount > 0
+        order by
+          case
+            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
+            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
+          end,
+          s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.*,
+          so.id as sales_order_id
+        from latest
+        join sales_orders so
+          on so.tenant_id = $1
+         and (
+           (latest.external_invoice_no is not null and so.external_invoice_no = latest.external_invoice_no)
+           or
+           (latest.external_invoice_no is null and so.external_order_id = latest.external_order_id)
+         )
+      ),
+      matched as (
+        select
+          resolved.source_row_number,
+          op.id as payment_id
+        from resolved
+        join order_payments op
+          on op.tenant_id = $1
+         and op.sales_order_id = resolved.sales_order_id
+         and (
+           (resolved.payment_external_ref is not null and op.external_ref = resolved.payment_external_ref)
+           or
+           (
+             resolved.payment_external_ref is null
+             and op.external_ref is null
+             and op.payment_date = resolved.payment_date
+             and coalesce(op.payment_mode, '') = coalesce(resolved.payment_mode, '')
+             and op.amount = resolved.payment_amount
+           )
+         )
+      )
+      update order_payments op
+      set payment_date = resolved.payment_date,
+          payment_mode = resolved.payment_mode,
+          amount = resolved.payment_amount,
+          external_ref = resolved.payment_external_ref
+      from resolved
+      join matched on matched.source_row_number = resolved.source_row_number
+      where op.id = matched.payment_id
+      `,
+      [tenantId]
+    );
+
+    await runner.query(
+      `
+      with latest as (
+        select distinct on (
+          case
+            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
+            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
+          end
+        )
+          ${orderIdentity} as order_identity,
+          s.*
+        from ${stageTable} s
+        where s.payment_amount is not null and s.payment_amount > 0
+        order by
+          case
+            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
+            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
+          end,
+          s.source_row_number desc
+      ),
+      resolved as (
+        select
+          latest.*,
+          so.id as sales_order_id
+        from latest
+        join sales_orders so
+          on so.tenant_id = $1
+         and (
+           (latest.external_invoice_no is not null and so.external_invoice_no = latest.external_invoice_no)
+           or
+           (latest.external_invoice_no is null and so.external_order_id = latest.external_order_id)
+         )
+      )
+      insert into order_payments (
+        tenant_id,
+        sales_order_id,
+        payment_date,
+        payment_mode,
+        amount,
+        external_ref
+      )
+      select
+        $1,
+        resolved.sales_order_id,
+        resolved.payment_date,
+        resolved.payment_mode,
+        resolved.payment_amount,
+        resolved.payment_external_ref
+      from resolved
+      where not exists (
+        select 1
+        from order_payments op
+        where op.tenant_id = $1
+          and op.sales_order_id = resolved.sales_order_id
+          and (
+            (resolved.payment_external_ref is not null and op.external_ref = resolved.payment_external_ref)
+            or
+            (
+              resolved.payment_external_ref is null
+              and op.external_ref is null
+              and op.payment_date = resolved.payment_date
+              and coalesce(op.payment_mode, '') = coalesce(resolved.payment_mode, '')
+              and op.amount = resolved.payment_amount
+            )
+          )
+      )
+      `,
+      [tenantId]
+    );
+  }
+
+  private async attachImportToRefreshJob(
+    runner: QueryRunner,
+    tenantId: number,
+    batchId: number
+  ): Promise<RefreshJobSummary> {
+    const queuedRows = await runner.query(
+      `
+      select id, status, requested_at, started_at, completed_at, error_text
+      from tenant_refresh_jobs
+      where tenant_id = $1 and status = 'QUEUED'
+      order by requested_at asc
+      for update
+      limit 1
+      `,
+      [tenantId]
+    );
+    if (queuedRows.length) {
+      const queued = this.refreshJobSummaryFromRow(queuedRows[0]);
+      await runner.query(
+        `
+        insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+        values ($1, $2)
+        on conflict (import_batch_id)
+        do update set refresh_job_id = excluded.refresh_job_id
+        `,
+        [queued.id, batchId]
+      );
+      return queued;
+    }
+
+    const runningRows = await runner.query(
+      `
+      select id, status, requested_at, started_at, completed_at, error_text
+      from tenant_refresh_jobs
+      where tenant_id = $1 and status = 'RUNNING'
+      order by started_at asc
+      for update
+      limit 1
+      `,
+      [tenantId]
+    );
+    if (runningRows.length) {
+      const running = this.refreshJobSummaryFromRow(runningRows[0]);
+      await runner.query(
+        `
+        update tenant_refresh_jobs
+        set rerun_requested = true,
+            updated_at = now()
+        where id = $1
+        `,
+        [running.id]
+      );
+      await runner.query(
+        `
+        insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+        values ($1, $2)
+        on conflict (import_batch_id)
+        do update set refresh_job_id = excluded.refresh_job_id
+        `,
+        [running.id, batchId]
+      );
+      return running;
+    }
+
+    try {
+      const createdRows = await runner.query(
+        `
+        insert into tenant_refresh_jobs (tenant_id, status, trigger_metadata)
+        values ($1, 'QUEUED', $2::jsonb)
+        returning id, status, requested_at, started_at, completed_at, error_text
+        `,
+        [tenantId, JSON.stringify({ trigger: 'import', importBatchId: batchId })]
+      );
+      const created = this.refreshJobSummaryFromRow(createdRows[0]);
+      await runner.query(
+        `
+        insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+        values ($1, $2)
+        on conflict (import_batch_id)
+        do update set refresh_job_id = excluded.refresh_job_id
+        `,
+        [created.id, batchId]
+      );
+      return created;
+    } catch (error: any) {
+      const retriedRows = await runner.query(
+        `
+        select id, status, requested_at, started_at, completed_at, error_text
+        from tenant_refresh_jobs
+        where tenant_id = $1 and status in ('QUEUED', 'RUNNING')
+        order by case status when 'RUNNING' then 0 else 1 end, requested_at asc
+        limit 1
+        `,
+        [tenantId]
+      );
+      if (!retriedRows.length) {
+        throw error;
+      }
+      const existing = this.refreshJobSummaryFromRow(retriedRows[0]);
+      await runner.query(
+        `
+        insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+        values ($1, $2)
+        on conflict (import_batch_id)
+        do update set refresh_job_id = excluded.refresh_job_id
+        `,
+        [existing.id, batchId]
+      );
+      return existing;
+    }
+  }
+
+  private async finalizeRefreshJob(jobId: number, status: 'COMPLETED' | 'FAILED', errorText: string | null): Promise<void> {
     const runner = this.db.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
     try {
-      for (let index = 0; index < rows.length; index += 1) {
-        const row = rows[index];
-        const sourceRowNumber = index + 2;
+      const rows = await runner.query(
+        `
+        select id, tenant_id, status, started_at, rerun_requested
+        from tenant_refresh_jobs
+        where id = $1
+        for update
+        `,
+        [jobId]
+      );
+      if (!rows.length) {
+        await runner.rollbackTransaction();
+        return;
+      }
 
-        const rawRows = await runner.query(
+      const row = rows[0];
+      await runner.query(
+        `
+        update tenant_refresh_jobs
+        set status = $2,
+            error_text = $3,
+            completed_at = now(),
+            updated_at = now()
+        where id = $1
+        `,
+        [jobId, status, errorText]
+      );
+
+      if (row.rerun_requested) {
+        const createdRows = await runner.query(
           `
-          insert into raw_records (import_batch_id, source_row_number, raw_row_json)
-          values ($1, $2, $3::jsonb)
+          insert into tenant_refresh_jobs (tenant_id, status, trigger_metadata)
+          values ($1, 'QUEUED', $2::jsonb)
           returning id
           `,
-          [batchId, sourceRowNumber, JSON.stringify(row)]
+          [Number(row.tenant_id), JSON.stringify({ trigger: 'rerun_after_running_job', previousRefreshJobId: jobId })]
         );
-        const rawRecordId = Number(rawRows[0].id);
-
-        const distributorCode = this.readOrdersBookText(row, 'distributors.distributor_code');
-        const distributorName = this.readOrdersBookText(row, 'distributors.distributor_name') || distributorCode;
-        const distributorZone = this.readOrdersBookText(row, 'distributors.zone') || null;
-        const distributorRegion = this.readOrdersBookText(row, 'distributors.region') || null;
-        const distributorArea = this.readOrdersBookText(row, 'distributors.area') || null;
-
-        const distributorRows = await runner.query(
-          `
-          insert into distributors (tenant_id, distributor_code, distributor_name, zone, region, area, active)
-          values ($1,$2,$3,$4,$5,$6,true)
-          on conflict (tenant_id, distributor_code)
-          do update set
-            distributor_name = excluded.distributor_name,
-            zone = excluded.zone,
-            region = excluded.region,
-            area = excluded.area,
-            active = true,
-            updated_at = now()
-          returning id
-          `,
-          [tenantId, distributorCode, distributorName, distributorZone, distributorRegion, distributorArea]
-        );
-        const distributorId = Number(distributorRows[0].id);
-
-        const beatCode = this.readOrdersBookText(row, 'beats.beat_code');
-        const beatName = this.readOrdersBookText(row, 'beats.beat_name') || beatCode;
-        const beatRows = await runner.query(
-          `
-          insert into beats (tenant_id, beat_code, beat_name, distributor_id, zone, region, area, active)
-          values ($1,$2,$3,$4,$5,$6,$7,true)
-          on conflict (tenant_id, beat_code)
-          do update set
-            beat_name = excluded.beat_name,
-            distributor_id = excluded.distributor_id,
-            zone = excluded.zone,
-            region = excluded.region,
-            area = excluded.area,
-            active = true,
-            updated_at = now()
-          returning id
-          `,
-          [tenantId, beatCode, beatName, distributorId, distributorZone, distributorRegion, distributorArea]
-        );
-        const beatId = Number(beatRows[0].id);
-
-        const salesmanCode = this.readOrdersBookText(row, 'salesmen.salesman_code');
-        const salesmanRows = await runner.query(
-          `
-          insert into salesmen (
-            tenant_id, salesman_code, salesman_name, employee_code, external_salesman_id, phone_number,
-            zone, region, area, distributor_id, active
-          )
-          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
-          on conflict (tenant_id, salesman_code)
-          do update set
-            salesman_name = excluded.salesman_name,
-            employee_code = excluded.employee_code,
-            external_salesman_id = excluded.external_salesman_id,
-            phone_number = excluded.phone_number,
-            zone = excluded.zone,
-            region = excluded.region,
-            area = excluded.area,
-            distributor_id = excluded.distributor_id,
-            active = true,
-            updated_at = now()
-          returning id
-          `,
-          [
-            tenantId,
-            salesmanCode,
-            this.readOrdersBookText(row, 'salesmen.salesman_name') || salesmanCode,
-            this.readOrdersBookText(row, 'salesmen.employee_code') || null,
-            this.readOrdersBookText(row, 'salesmen.external_salesman_id') || null,
-            normalizePhone(this.readOrdersBookText(row, 'salesmen.phone_number')) || null,
-            this.readOrdersBookText(row, 'salesmen.zone') || distributorZone,
-            this.readOrdersBookText(row, 'salesmen.region') || distributorRegion,
-            this.readOrdersBookText(row, 'salesmen.area') || distributorArea,
-            distributorId
-          ]
-        );
-        const salesmanId = Number(salesmanRows[0].id);
-
-        const tenantOutletCode = this.readOrdersBookText(row, 'tenant_outlets.tenant_outlet_code');
-        let outletId: number | null = null;
-        const existingTenantOutletRows = await runner.query(
-          `
-          select to2.id as tenant_outlet_id, o.id as outlet_id
-          from tenant_outlets to2
-          join outlets o on o.id = to2.outlet_id
-          where to2.tenant_id = $1 and to2.tenant_outlet_code = $2
-          limit 1
-          `,
-          [tenantId, tenantOutletCode]
-        );
-        let tenantOutletId: number | null = existingTenantOutletRows.length ? Number(existingTenantOutletRows[0].tenant_outlet_id) : null;
-        if (existingTenantOutletRows.length) {
-          outletId = Number(existingTenantOutletRows[0].outlet_id);
-        } else {
-          const insertedOutletRows = await runner.query(
-            `
-            insert into outlets (
-              external_outlet_code, outlet_name, mobile_number, gst_number, address_line1, address_line2, pincode,
-              latitude, longitude, zone, region, area, active
-            )
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true)
-            returning id
-            `,
-            [
-              this.readOrdersBookText(row, 'outlets.external_outlet_code'),
-              this.readOrdersBookText(row, 'outlets.outlet_name') || this.readOrdersBookText(row, 'outlets.external_outlet_code'),
-              normalizePhone(this.readOrdersBookText(row, 'outlets.mobile_number')) || null,
-              this.readOrdersBookText(row, 'outlets.gst_number') || null,
-              this.readOrdersBookText(row, 'outlets.address_line1') || null,
-              this.readOrdersBookText(row, 'outlets.address_line2') || null,
-              this.readOrdersBookText(row, 'outlets.pincode') || null,
-              this.readOrdersBookNumber(row, 'outlets.latitude'),
-              this.readOrdersBookNumber(row, 'outlets.longitude'),
-              this.readOrdersBookText(row, 'outlets.zone') || distributorZone,
-              this.readOrdersBookText(row, 'outlets.region') || distributorRegion,
-              this.readOrdersBookText(row, 'outlets.area') || distributorArea
-            ]
-          );
-          outletId = Number(insertedOutletRows[0].id);
-        }
-
-        await runner.query(
-          `
-          update outlets
-          set external_outlet_code = $2,
-              outlet_name = $3,
-              mobile_number = $4,
-              gst_number = $5,
-              address_line1 = $6,
-              address_line2 = $7,
-              pincode = $8,
-              latitude = $9,
-              longitude = $10,
-              zone = $11,
-              region = $12,
-              area = $13,
-              active = true,
-              updated_at = now()
-          where id = $1
-          `,
-          [
-            outletId,
-            this.readOrdersBookText(row, 'outlets.external_outlet_code') || null,
-            this.readOrdersBookText(row, 'outlets.outlet_name') || null,
-            normalizePhone(this.readOrdersBookText(row, 'outlets.mobile_number')) || null,
-            this.readOrdersBookText(row, 'outlets.gst_number') || null,
-            this.readOrdersBookText(row, 'outlets.address_line1') || null,
-            this.readOrdersBookText(row, 'outlets.address_line2') || null,
-            this.readOrdersBookText(row, 'outlets.pincode') || null,
-            this.readOrdersBookNumber(row, 'outlets.latitude'),
-            this.readOrdersBookNumber(row, 'outlets.longitude'),
-            this.readOrdersBookText(row, 'outlets.zone') || distributorZone,
-            this.readOrdersBookText(row, 'outlets.region') || distributorRegion,
-            this.readOrdersBookText(row, 'outlets.area') || distributorArea
-          ]
-        );
-
-        const orderSaleDate = this.readOrdersBookDate(row, 'sales_orders.order_sale_date');
-        const tenantOutletRows = await runner.query(
-          `
-          insert into tenant_outlets (
-            tenant_id, outlet_id, tenant_outlet_code, salesman_id, distributor_id, servicing_status, active, first_order_date, last_order_date
-          )
-          values ($1,$2,$3,$4,$5,$6,true,$7::date,$7::date)
-          on conflict (tenant_id, tenant_outlet_code)
-          do update set
-            outlet_id = excluded.outlet_id,
-            salesman_id = excluded.salesman_id,
-            distributor_id = excluded.distributor_id,
-            servicing_status = coalesce(excluded.servicing_status, tenant_outlets.servicing_status),
-            active = true,
-            first_order_date = coalesce(tenant_outlets.first_order_date, excluded.first_order_date),
-            last_order_date = coalesce(excluded.last_order_date, tenant_outlets.last_order_date),
-            updated_at = now()
-          returning id
-          `,
-          [
-            tenantId,
-            outletId,
-            tenantOutletCode,
-            salesmanId,
-            distributorId,
-            'active',
-            orderSaleDate
-          ]
-        );
-        tenantOutletId = Number(tenantOutletRows[0].id);
-
-        await runner.query(
-          `
-          update beat_outlets
-          set active = false,
-              removed_at = now(),
-              removed_by = 'ingestion',
-              updated_at = now()
-          where tenant_id = $1 and outlet_id = $2 and beat_id <> $3 and active = true
-          `,
-          [tenantId, outletId, beatId]
-        );
-        await runner.query(
-          `
-          insert into beat_outlets (tenant_id, beat_id, outlet_id, active, assigned_at, assigned_by, removed_at, removed_by)
-          values ($1,$2,$3,true,coalesce($4::timestamptz, now()),'ingestion',null,null)
-          on conflict (tenant_id, beat_id, outlet_id)
-          do update set
-            active = true,
-            removed_at = null,
-            removed_by = null,
-            assigned_at = coalesce(beat_outlets.assigned_at, excluded.assigned_at),
-            updated_at = now()
-          `,
-          [tenantId, beatId, outletId, this.readOrdersBookTimestamp(row, 'sales_orders.order_punched_at')]
-        );
-
-        const brandCode = this.readOrdersBookText(row, 'brands.brand_code');
-        let brandRows = await runner.query(`select id from brands where tenant_id = $1 and brand_code = $2 limit 1`, [tenantId, brandCode]);
-        if (!brandRows.length) {
-          brandRows = await runner.query(`select id from brands where tenant_id = $1 and lower(brand_name) = lower($2) limit 1`, [
-            tenantId,
-            this.readOrdersBookText(row, 'brands.brand_name')
-          ]);
-        }
-        let brandId: number;
-        if (brandRows.length) {
-          brandId = Number(brandRows[0].id);
+        const nextJobId = Number(createdRows[0]?.id || 0);
+        if (nextJobId) {
           await runner.query(
             `
-            update brands
-            set brand_code = $2, brand_name = $3, active = true, updated_at = now()
-            where id = $1
+            update tenant_refresh_job_imports
+            set refresh_job_id = $2
+            where refresh_job_id = $1
+              and created_at >= coalesce($3::timestamptz, now())
             `,
-            [brandId, brandCode || null, this.readOrdersBookText(row, 'brands.brand_name') || brandCode]
+            [jobId, nextJobId, row.started_at]
           );
-        } else {
-          const insertedBrandRows = await runner.query(
-            `
-            insert into brands (tenant_id, brand_code, brand_name, active)
-            values ($1,$2,$3,true)
-            returning id
-            `,
-            [tenantId, brandCode || null, this.readOrdersBookText(row, 'brands.brand_name') || brandCode]
-          );
-          brandId = Number(insertedBrandRows[0].id);
-        }
-
-        const skuRows = await runner.query(
-          `
-          insert into skus (
-            tenant_id, sku_code, name, brand_id, hsn_code, mrp, discount_amount, discount_percent, rate,
-            sgst_percent, sgst_amount, cgst_percent, cgst_amount, amount, weight, length_cm, width_cm, height_cm,
-            igst_percent, igst_amount, active
-          )
-          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,true)
-          on conflict (tenant_id, sku_code)
-          do update set
-            name = excluded.name,
-            brand_id = excluded.brand_id,
-            hsn_code = excluded.hsn_code,
-            mrp = excluded.mrp,
-            discount_amount = excluded.discount_amount,
-            discount_percent = excluded.discount_percent,
-            rate = excluded.rate,
-            sgst_percent = excluded.sgst_percent,
-            sgst_amount = excluded.sgst_amount,
-            cgst_percent = excluded.cgst_percent,
-            cgst_amount = excluded.cgst_amount,
-            amount = excluded.amount,
-            weight = excluded.weight,
-            length_cm = excluded.length_cm,
-            width_cm = excluded.width_cm,
-            height_cm = excluded.height_cm,
-            igst_percent = excluded.igst_percent,
-            igst_amount = excluded.igst_amount,
-            active = true,
-            updated_at = now()
-          returning id
-          `,
-          [
-            tenantId,
-            this.readOrdersBookText(row, 'skus.sku_code'),
-            this.readOrdersBookText(row, 'skus.name') || this.readOrdersBookText(row, 'skus.sku_code'),
-            brandId,
-            this.readOrdersBookText(row, 'skus.hsn_code') || null,
-            this.readOrdersBookNumber(row, 'skus.mrp'),
-            this.readOrdersBookNumber(row, 'skus.discount_amount'),
-            this.readOrdersBookNumber(row, 'skus.discount_percent'),
-            this.readOrdersBookNumber(row, 'skus.rate'),
-            this.readOrdersBookNumber(row, 'skus.sgst_percent'),
-            this.readOrdersBookNumber(row, 'skus.sgst_amount'),
-            this.readOrdersBookNumber(row, 'skus.cgst_percent'),
-            this.readOrdersBookNumber(row, 'skus.cgst_amount'),
-            this.readOrdersBookNumber(row, 'skus.amount'),
-            this.readOrdersBookNumber(row, 'skus.weight'),
-            this.readOrdersBookNumber(row, 'skus.length_cm'),
-            this.readOrdersBookNumber(row, 'skus.width_cm'),
-            this.readOrdersBookNumber(row, 'skus.height_cm'),
-            this.readOrdersBookNumber(row, 'skus.igst_percent'),
-            this.readOrdersBookNumber(row, 'skus.igst_amount')
-          ]
-        );
-        const skuId = Number(skuRows[0].id);
-
-        const invoiceNo = this.readOrdersBookText(row, 'sales_orders.external_invoice_no');
-        const externalOrderId = this.readOrdersBookText(row, 'sales_orders.external_order_id');
-        const existingOrderRows = invoiceNo
-          ? await runner.query(`select id from sales_orders where tenant_id = $1 and external_invoice_no = $2 limit 1`, [tenantId, invoiceNo])
-          : await runner.query(`select id from sales_orders where tenant_id = $1 and external_order_id = $2 limit 1`, [tenantId, externalOrderId]);
-
-        let salesOrderId: number;
-        if (existingOrderRows.length) {
-          salesOrderId = Number(existingOrderRows[0].id);
-          await runner.query(
-            `
-            update sales_orders
-            set import_batch_id = $2,
-                external_order_id = $3,
-                external_invoice_no = $4,
-                external_awb_no = $5,
-                order_punched_at = $6::timestamptz,
-                order_sale_date = $7::date,
-                outlet_id = $8,
-                tenant_outlet_id = $9,
-                beat_id = $10,
-                salesman_id = $11,
-                distributor_id = $12,
-                gross_amount = $13,
-                discount_amount = $14,
-                tax_amount = $15,
-                net_amount = $16,
-                collections_amount = $17,
-                outstanding_amount = $18,
-                decided_margin_amount = $19,
-                remarks = $20,
-                latest_source_record_id = $21,
-                updated_at = now()
-            where id = $1
-            `,
-            [
-              salesOrderId,
-              batchId,
-              externalOrderId || null,
-              invoiceNo || null,
-              this.readOrdersBookText(row, 'sales_orders.external_awb_no') || null,
-              this.readOrdersBookTimestamp(row, 'sales_orders.order_punched_at'),
-              orderSaleDate,
-              outletId,
-              tenantOutletId,
-              beatId,
-              salesmanId,
-              distributorId,
-              this.readOrdersBookNumber(row, 'sales_orders.gross_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.discount_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.tax_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.net_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.collections_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.outstanding_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.decided_margin_amount'),
-              this.readOrdersBookText(row, 'sales_orders.remarks') || null,
-              rawRecordId
-            ]
-          );
-        } else {
-          const insertedOrderRows = await runner.query(
-            `
-            insert into sales_orders (
-              tenant_id, import_batch_id, external_order_id, external_invoice_no, external_awb_no, order_punched_at, order_sale_date,
-              outlet_id, tenant_outlet_id, beat_id, salesman_id, distributor_id, gross_amount, discount_amount, tax_amount, net_amount,
-              collections_amount, outstanding_amount, decided_margin_amount, remarks, first_source_record_id, latest_source_record_id
-            )
-            values ($1,$2,$3,$4,$5,$6::timestamptz,$7::date,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21)
-            returning id
-            `,
-            [
-              tenantId,
-              batchId,
-              externalOrderId || null,
-              invoiceNo || null,
-              this.readOrdersBookText(row, 'sales_orders.external_awb_no') || null,
-              this.readOrdersBookTimestamp(row, 'sales_orders.order_punched_at'),
-              orderSaleDate,
-              outletId,
-              tenantOutletId,
-              beatId,
-              salesmanId,
-              distributorId,
-              this.readOrdersBookNumber(row, 'sales_orders.gross_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.discount_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.tax_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.net_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.collections_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.outstanding_amount'),
-              this.readOrdersBookNumber(row, 'sales_orders.decided_margin_amount'),
-              this.readOrdersBookText(row, 'sales_orders.remarks') || null,
-              rawRecordId
-            ]
-          );
-          salesOrderId = Number(insertedOrderRows[0].id);
-        }
-        await this.insertCanonicalLineage(runner, 'sales_orders', salesOrderId, rawRecordId, 'order');
-
-        const lineId = this.readOrdersBookText(row, 'sales_order_items.external_line_id');
-        const existingSalesOrderItemRows = await runner.query(
-          `
-          select id from sales_order_items
-          where sales_order_id = $1 and external_line_id = $2
-          limit 1
-          `,
-          [salesOrderId, lineId]
-        );
-
-        let salesOrderItemId: number;
-        if (existingSalesOrderItemRows.length) {
-          salesOrderItemId = Number(existingSalesOrderItemRows[0].id);
-          await runner.query(
-            `
-            update sales_order_items
-            set sku_id = $2,
-                ordered_quantity = $3,
-                rate = $4,
-                discount_amount = $5,
-                discount_percent = $6,
-                sgst_percent = $7,
-                sgst_amount = $8,
-                cgst_percent = $9,
-                cgst_amount = $10,
-                igst_percent = $11,
-                igst_amount = $12,
-                tax_amount = $13,
-                amount = $14,
-                latest_source_record_id = $15,
-                updated_at = now()
-            where id = $1
-            `,
-            [
-              salesOrderItemId,
-              skuId,
-              this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
-              this.readOrdersBookNumber(row, 'sales_order_items.rate'),
-              this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.discount_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.sgst_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.sgst_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.cgst_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.cgst_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.igst_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.amount'),
-              rawRecordId
-            ]
-          );
-        } else {
-          const salesOrderItemRows = await runner.query(
-            `
-            insert into sales_order_items (
-              sales_order_id, sku_id, external_line_id, ordered_quantity, rate, discount_amount, discount_percent,
-              sgst_percent, sgst_amount, cgst_percent, cgst_amount, igst_percent, igst_amount, tax_amount, amount,
-              first_source_record_id, latest_source_record_id
-            )
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
-            returning id
-            `,
-            [
-              salesOrderId,
-              skuId,
-              lineId,
-              this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
-              this.readOrdersBookNumber(row, 'sales_order_items.rate'),
-              this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.discount_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.sgst_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.sgst_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.cgst_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.cgst_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.igst_percent'),
-              this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
-              this.readOrdersBookNumber(row, 'sales_order_items.amount'),
-              rawRecordId
-            ]
-          );
-          salesOrderItemId = Number(salesOrderItemRows[0].id);
-        }
-        await this.insertCanonicalLineage(runner, 'sales_order_items', salesOrderItemId, rawRecordId, 'line_item');
-
-        const paymentAmount = this.readOrdersBookNumber(row, 'order_payments.amount');
-        const paymentExternalRef = this.readOrdersBookText(row, 'order_payments.external_ref');
-        if (paymentAmount !== null && paymentAmount > 0) {
-          let paymentRows: any[] = [];
-          if (paymentExternalRef) {
-            paymentRows = await runner.query(
-              `
-              select id from order_payments
-              where tenant_id = $1 and sales_order_id = $2 and external_ref = $3
-              limit 1
-              `,
-              [tenantId, salesOrderId, paymentExternalRef]
-            );
-          } else {
-            paymentRows = await runner.query(
-              `
-              select id from order_payments
-              where tenant_id = $1 and sales_order_id = $2 and payment_date = $3::date
-                and coalesce(payment_mode,'') = coalesce($4,'')
-                and amount = $5
-                and external_ref is null
-              limit 1
-              `,
-              [
-                tenantId,
-                salesOrderId,
-                this.readOrdersBookDate(row, 'order_payments.payment_date'),
-                this.readOrdersBookText(row, 'order_payments.payment_mode') || null,
-                paymentAmount
-              ]
-            );
-          }
-
-          let paymentId: number;
-          if (paymentRows.length) {
-            paymentId = Number(paymentRows[0].id);
-            await runner.query(
-              `
-              update order_payments
-              set payment_date = $2::date,
-                  payment_mode = $3,
-                  amount = $4,
-                  external_ref = $5,
-                  source_record_id = $6
-              where id = $1
-              `,
-              [
-                paymentId,
-                this.readOrdersBookDate(row, 'order_payments.payment_date'),
-                this.readOrdersBookText(row, 'order_payments.payment_mode') || null,
-                paymentAmount,
-                paymentExternalRef || null,
-                rawRecordId
-              ]
-            );
-          } else {
-            const insertedPaymentRows = await runner.query(
-              `
-              insert into order_payments (tenant_id, sales_order_id, payment_date, payment_mode, amount, external_ref, source_record_id)
-              values ($1,$2,$3::date,$4,$5,$6,$7)
-              returning id
-              `,
-              [
-                tenantId,
-                salesOrderId,
-                this.readOrdersBookDate(row, 'order_payments.payment_date'),
-                this.readOrdersBookText(row, 'order_payments.payment_mode') || null,
-                paymentAmount,
-                paymentExternalRef || null,
-                rawRecordId
-              ]
-            );
-            paymentId = Number(insertedPaymentRows[0].id);
-          }
-          await this.insertCanonicalLineage(runner, 'order_payments', paymentId, rawRecordId, 'payment');
         }
       }
 
       await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  private async persistOrdersBookRows(
+    tenantId: number,
+    batchId: number,
+    rows: NormalizedOrdersBookRow[]
+  ): Promise<RefreshJobSummary> {
+    const runner = this.db.createQueryRunner();
+    const stageTable = this.stageTableName(batchId);
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      await this.createImportStageTable(runner, stageTable);
+      await this.copyRowsIntoImportStage(runner, stageTable, rows);
+      console.log(`[import:${batchId}] copy_done rows=${rows.length}`);
+
+      await this.upsertDistributorsFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_distributors_done`);
+
+      await this.upsertBeatsFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_beats_done`);
+
+      await this.upsertSalesmenFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_salesmen_done`);
+
+      await this.upsertOutletsAndTenantOutletsFromStage(runner, stageTable, batchId, tenantId);
+      console.log(`[import:${batchId}] upsert_outlets_done`);
+
+      await this.upsertBrandsFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_brands_done`);
+
+      await this.upsertSkusFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_skus_done`);
+
+      await this.upsertSalesOrdersFromStage(runner, stageTable, tenantId, batchId);
+      console.log(`[import:${batchId}] upsert_orders_done`);
+
+      await this.upsertSalesOrderItemsFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_order_items_done`);
+
+      await this.upsertOrderPaymentsFromStage(runner, stageTable, tenantId);
+      console.log(`[import:${batchId}] upsert_payments_done`);
+
+      const refreshJob = await this.attachImportToRefreshJob(runner, tenantId, batchId);
+      console.log(`[import:${batchId}] refresh_job_queued job_id=${refreshJob.id} status=${refreshJob.status}`);
+
+      await runner.commitTransaction();
+      return refreshJob;
     } catch (error) {
       await runner.rollbackTransaction();
       throw error;
@@ -3005,6 +4020,7 @@ export class SupeV1Service {
     }
 
     let parsedRows: OrdersBookRow[] = [];
+    let normalizedRows: NormalizedOrdersBookRow[] = [];
     let headers: string[] = [];
     try {
       await phase('s3_download');
@@ -3026,17 +4042,20 @@ export class SupeV1Service {
       throw error;
     }
 
+    await phase('normalize_rows');
+    normalizedRows = this.normalizeOrdersBookRows(parsedRows);
+
     await phase('validate_rows');
-    const validationErrors = this.validateOrdersBook(headers, parsedRows);
+    const validationErrors = this.validateOrdersBook(headers, normalizedRows);
     console.log(`[import:${batchId}] validate_rows_done errors=${validationErrors.length}`);
     if (validationErrors.length) {
-      await this.failImportBatch(batchId, 'Import validation failed', validationErrors, 'validation', parsedRows.length);
+      await this.failImportBatch(batchId, 'Import validation failed', validationErrors, 'validation', normalizedRows.length);
       return true;
     }
 
     try {
       await phase('persist_rows');
-      await this.persistOrdersBookRows(batch.tenantId, batchId, parsedRows);
+      const refreshJob = await this.persistOrdersBookRows(batch.tenantId, batchId, normalizedRows);
       console.log(`[import:${batchId}] persist_rows_done`);
       await this.db.query(
         `
@@ -3046,11 +4065,17 @@ export class SupeV1Service {
             valid_rows = $2,
             rejected_rows = 0,
             error_count = 0,
-            import_status = 'PROCESSING',
-            notes = 'refresh_tenant_state'
+            import_status = 'COMPLETED',
+            notes = $4,
+            completed_at = now()
         where id = $1
         `,
-        [batchId, parsedRows.length, headers.length]
+        [
+          batchId,
+          normalizedRows.length,
+          headers.length,
+          refreshJob.status === 'RUNNING' ? `Import committed; refresh running (#${refreshJob.id})` : `Import committed; refresh queued (#${refreshJob.id})`
+        ]
       );
     } catch (error: any) {
       await this.failImportBatch(
@@ -3058,37 +4083,52 @@ export class SupeV1Service {
         String(error?.message || 'Import failed during processing'),
         [{ sNo: 'SYSTEM', rowNumber: 0, column: 'processing', message: String(error?.message || 'Import failed') }],
         'processing',
-        parsedRows.length
+        normalizedRows.length
       );
       throw error;
     }
 
+    return true;
+  }
+
+  async processNextQueuedRefreshJob(workerId: string): Promise<boolean> {
+    const rawResult = await this.db.query(
+      `
+      with candidate as (
+        select id
+        from tenant_refresh_jobs
+        where status = 'QUEUED'
+        order by requested_at asc
+        for update skip locked
+        limit 1
+      )
+      update tenant_refresh_jobs trj
+      set status = 'RUNNING',
+          started_at = coalesce(started_at, now()),
+          error_text = null,
+          updated_at = now()
+      from candidate
+      where trj.id = candidate.id
+      returning trj.id, trj.tenant_id
+      `
+    );
+    const rows = this.normalizeReturnedRows<{ id?: number | string; tenant_id?: number | string }>(rawResult);
+    const refreshJobId = Number(rows[0]?.id || 0);
+    const tenantId = Number(rows[0]?.tenant_id || 0);
+    if (!refreshJobId || !tenantId) {
+      return false;
+    }
+
     try {
-      await phase('refresh_tenant_state');
-      const postImport = await this.refreshTenantState(batch.tenantId, workerId);
-      console.log(`[import:${batchId}] refresh_tenant_state_done elapsed_ms=${Date.now() - t0}`);
-      await this.db.query(
-        `
-        update import_batches
-        set import_status = 'COMPLETED',
-            notes = $2,
-            completed_at = now()
-        where id = $1
-        `,
-        [
-          batchId,
-          `signal_run=${postImport.signalRunId};catalog_tables=${postImport.catalog.refreshedTables};catalog_columns=${postImport.catalog.refreshedColumns}`
-        ]
+      const result = await this.refreshTenantState(tenantId, workerId);
+      await this.finalizeRefreshJob(refreshJobId, 'COMPLETED', null);
+      console.log(
+        `[refresh-job:${refreshJobId}] refresh_job_done signal_run=${result.signalRunId} catalog_tables=${result.catalog.refreshedTables}`
       );
     } catch (error: any) {
-      await this.failImportBatch(
-        batchId,
-        `post_import_failed: ${String(error?.message || 'unknown error')}`,
-        [{ sNo: 'SYSTEM', rowNumber: 0, column: 'post_import', message: String(error?.message || 'Post import failed') }],
-        'post_import',
-        parsedRows.length
-      );
-      throw error;
+      const errorMessage = String(error?.message || 'unknown error');
+      await this.finalizeRefreshJob(refreshJobId, 'FAILED', errorMessage);
+      console.log(`[refresh-job:${refreshJobId}] refresh_job_failed error=${errorMessage}`);
     }
 
     return true;
@@ -3098,10 +4138,9 @@ export class SupeV1Service {
     const tenantId = await this.resolveTenantId(user);
     const rows = await this.db.query(
       `
-      select *
-      from import_batches
-      where tenant_id = $1
-      order by created_at desc
+      ${this.importBatchBaseSelect()}
+      where ib.tenant_id = $1
+      order by ib.created_at desc
       limit $2
       `,
       [tenantId, limit]
@@ -3111,7 +4150,7 @@ export class SupeV1Service {
 
   async getImportById(user: IAuthUser | undefined, importId: number) {
     const tenantId = await this.resolveTenantId(user);
-    const rows = await this.db.query(`select * from import_batches where id = $1 and tenant_id = $2 limit 1`, [importId, tenantId]);
+    const rows = await this.db.query(`${this.importBatchBaseSelect()} where ib.id = $1 and ib.tenant_id = $2 limit 1`, [importId, tenantId]);
     if (!rows.length) {
       throw new Error('Import not found');
     }
@@ -3137,7 +4176,7 @@ export class SupeV1Service {
           error_count = greatest(error_count, 1)
       where id = $1
         and tenant_id = $2
-        and import_status in ('QUEUED', 'PROCESSING', 'IMPORTED')
+        and import_status in ('QUEUED', 'PROCESSING')
       returning id
       `,
       [importId, tenantId]

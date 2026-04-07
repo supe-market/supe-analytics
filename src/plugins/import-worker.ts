@@ -26,14 +26,15 @@ export function registerImportWorker(app: FastifyInstance): void {
   intervalIds.push(sweeperId);
 
   for (let index = 0; index < concurrency; index += 1) {
-    let running = false;
+    let importRunning = false;
     const workerId = `import-worker:${process.pid}:${workerToken}:${index + 1}`;
+    const refreshWorkerId = `refresh-worker:${process.pid}:${workerToken}:${index + 1}`;
 
-    const tick = async () => {
-      if (running) {
+    const importTick = async () => {
+      if (importRunning) {
         return;
       }
-      running = true;
+      importRunning = true;
       try {
         const processed = await service.processNextQueuedImport(workerId);
         if (processed) {
@@ -42,15 +43,39 @@ export function registerImportWorker(app: FastifyInstance): void {
       } catch (error) {
         app.log.error({ err: error, workerId }, 'import worker tick failed');
       } finally {
-        running = false;
+        importRunning = false;
+      }
+    };
+
+    let refreshRunning = false;
+    const refreshTick = async () => {
+      if (refreshRunning) {
+        return;
+      }
+      refreshRunning = true;
+      try {
+        const processed = await service.processNextQueuedRefreshJob(refreshWorkerId);
+        if (processed) {
+          app.log.info({ refreshWorkerId }, 'processed queued tenant refresh job');
+        }
+      } catch (error) {
+        app.log.error({ err: error, refreshWorkerId }, 'tenant refresh worker tick failed');
+      } finally {
+        refreshRunning = false;
       }
     };
 
     const intervalId = setInterval(() => {
-      void tick();
+      void importTick();
     }, intervalMs);
     intervalIds.push(intervalId);
-    void tick();
+    void importTick();
+
+    const refreshIntervalId = setInterval(() => {
+      void refreshTick();
+    }, intervalMs);
+    intervalIds.push(refreshIntervalId);
+    void refreshTick();
   }
 
   app.addHook('onClose', async () => {

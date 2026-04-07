@@ -169,114 +169,118 @@ test('createImport queues a valid workbook', async () => {
   }
 });
 
-test('persistOrdersBookRows touches the canonical tables for a valid row', async () => {
+test('persistOrdersBookRows uses bulk stage queries and queues a refresh job without raw lineage writes', async () => {
   const calls: QueryCall[] = [];
   const runner = createQueryRunner((sql: string, params?: any[]) => {
     calls.push({ sql, params: params || [] });
     const normalized = normalizeSql(sql);
-    if (normalized.includes('insert into raw_records')) return [{ id: 1 }];
-    if (normalized.includes('insert into distributors')) return [{ id: 11 }];
-    if (normalized.includes('insert into beats')) return [{ id: 12 }];
-    if (normalized.includes('insert into salesmen')) return [{ id: 13 }];
-    if (normalized.includes('select to2.id as tenant_outlet_id')) return [];
-    if (normalized.includes('insert into outlets')) return [{ id: 14 }];
-    if (normalized.startsWith('update outlets')) return [];
-    if (normalized.includes('insert into tenant_outlets')) return [{ id: 15 }];
-    if (normalized.startsWith('update beat_outlets')) return [];
-    if (normalized.includes('insert into beat_outlets')) return [];
-    if (normalized.includes('select id from brands where tenant_id = $1 and brand_code')) return [];
-    if (normalized.includes('select id from brands where tenant_id = $1 and lower(brand_name)')) return [];
-    if (normalized.includes('insert into brands')) return [{ id: 16 }];
-    if (normalized.includes('insert into skus')) return [{ id: 17 }];
-    if (normalized.includes('select id from sales_orders where tenant_id = $1 and external_invoice_no')) return [];
-    if (normalized.includes('insert into sales_orders')) return [{ id: 18 }];
-    if (normalized.includes('insert into canonical_record_sources')) return [];
-    if (normalized.includes('insert into sales_order_items')) return [{ id: 19 }];
-    if (normalized.includes('select id from order_payments where tenant_id = $1 and sales_order_id = $2 and external_ref')) return [];
-    if (normalized.includes('insert into order_payments')) return [{ id: 20 }];
+    if (normalized.includes("from tenant_refresh_jobs") && normalized.includes("status = 'queued'")) return [];
+    if (normalized.includes("from tenant_refresh_jobs") && normalized.includes("status = 'running'")) return [];
+    if (normalized.includes('insert into tenant_refresh_jobs')) {
+      return [
+        {
+          id: 501,
+          status: 'QUEUED',
+          requested_at: '2026-04-03T00:00:00.000Z',
+          started_at: null,
+          completed_at: null,
+          error_text: null
+        }
+      ];
+    }
     return [];
   });
 
-  const db = {
+  const service = new SupeV1Service({
     createQueryRunner: () => runner
-  };
-  const service = new SupeV1Service(db as any);
+  } as any);
+  const internal = service as any;
+  let copiedRows: any[] = [];
 
-  await (service as any).persistOrdersBookRows(42, 7, [buildValidOrdersBookRow()]);
+  internal.copyRowsIntoImportStage = async (_runner: unknown, _stageTable: string, rows: any[]) => {
+    copiedRows = rows;
+  };
+
+  const normalizedRows = internal.normalizeOrdersBookRows([buildValidOrdersBookRow()]);
+  const refreshJob = await internal.persistOrdersBookRows(42, 7, normalizedRows);
+
+  assert.equal(copiedRows.length, 1);
+  assert.equal(refreshJob.id, 501);
+  assert.equal(refreshJob.status, 'QUEUED');
 
   const seenSql = calls.map((call) => normalizeSql(call.sql));
-  const expectedTables = [
-    'insert into raw_records',
+  const expectedFragments = [
+    'create temp table temp_import_rows_7',
     'insert into distributors',
     'insert into beats',
     'insert into salesmen',
-    'insert into outlets',
     'insert into tenant_outlets',
-    'insert into beat_outlets',
     'insert into brands',
     'insert into skus',
     'insert into sales_orders',
     'insert into sales_order_items',
     'insert into order_payments',
-    'insert into canonical_record_sources'
+    'insert into tenant_refresh_jobs',
+    'insert into tenant_refresh_job_imports'
   ];
 
-  for (const fragment of expectedTables) {
+  for (const fragment of expectedFragments) {
     assert.ok(seenSql.some((sql) => sql.includes(fragment)), `expected query containing "${fragment}"`);
   }
+
+  assert.ok(!seenSql.some((sql) => sql.includes('raw_records')), 'expected no raw_records writes');
+  assert.ok(!seenSql.some((sql) => sql.includes('canonical_record_sources')), 'expected no canonical lineage writes');
 });
 
-test('persistOrdersBookRows updates existing line items without relying on on conflict', async () => {
+test('attachImportToRefreshJob coalesces onto a running job and marks it for rerun', async () => {
   const calls: QueryCall[] = [];
   const runner = createQueryRunner((sql: string, params?: any[]) => {
     calls.push({ sql, params: params || [] });
     const normalized = normalizeSql(sql);
-    if (normalized.includes('insert into raw_records')) return [{ id: 1 }];
-    if (normalized.includes('insert into distributors')) return [{ id: 11 }];
-    if (normalized.includes('insert into beats')) return [{ id: 12 }];
-    if (normalized.includes('insert into salesmen')) return [{ id: 13 }];
-    if (normalized.includes('select to2.id as tenant_outlet_id')) return [];
-    if (normalized.includes('insert into outlets')) return [{ id: 14 }];
-    if (normalized.startsWith('update outlets')) return [];
-    if (normalized.includes('insert into tenant_outlets')) return [{ id: 15 }];
-    if (normalized.startsWith('update beat_outlets')) return [];
-    if (normalized.includes('insert into beat_outlets')) return [];
-    if (normalized.includes('select id from brands where tenant_id = $1 and brand_code')) return [];
-    if (normalized.includes('select id from brands where tenant_id = $1 and lower(brand_name)')) return [];
-    if (normalized.includes('insert into brands')) return [{ id: 16 }];
-    if (normalized.includes('insert into skus')) return [{ id: 17 }];
-    if (normalized.includes('select id from sales_orders where tenant_id = $1 and external_invoice_no')) return [{ id: 18 }];
-    if (normalized.startsWith('update sales_orders')) return [];
-    if (normalized.includes('insert into canonical_record_sources')) return [];
-    if (normalized.includes('select id from sales_order_items where sales_order_id = $1 and external_line_id = $2')) return [{ id: 19 }];
-    if (normalized.startsWith('update sales_order_items')) return [];
+    if (normalized.includes("from tenant_refresh_jobs") && normalized.includes("status = 'queued'")) return [];
+    if (normalized.includes("from tenant_refresh_jobs") && normalized.includes("status = 'running'")) {
+      return [
+        {
+          id: 61,
+          status: 'RUNNING',
+          requested_at: '2026-04-03T00:00:00.000Z',
+          started_at: '2026-04-03T00:00:05.000Z',
+          completed_at: null,
+          error_text: null
+        }
+      ];
+    }
     return [];
   });
 
-  const db = {
-    createQueryRunner: () => runner
-  };
-  const service = new SupeV1Service(db as any);
+  const service = new SupeV1Service({} as any);
+  const refreshJob = await (service as any).attachImportToRefreshJob(runner, 42, 77);
 
-  await (service as any).persistOrdersBookRows(42, 7, [
-    buildValidOrdersBookRow({
-      'order_payments.amount': ''
-    })
-  ]);
-
+  assert.equal(refreshJob.id, 61);
+  assert.equal(refreshJob.status, 'RUNNING');
   const seenSql = calls.map((call) => normalizeSql(call.sql));
-  assert.ok(
-    seenSql.some((sql) => sql.startsWith('update sales_order_items')),
-    'expected existing line item update'
-  );
-  assert.ok(
-    !seenSql.some((sql) => sql.includes('insert into sales_order_items')),
-    'expected no sales_order_items insert when the line already exists'
-  );
-  assert.ok(
-    !seenSql.some((sql) => sql.includes('on conflict (sales_order_id, external_line_id)')),
-    'expected no on conflict usage for sales_order_items'
-  );
+  assert.ok(seenSql.some((sql) => sql.includes('set rerun_requested = true')), 'expected rerun_requested update');
+  assert.ok(seenSql.some((sql) => sql.includes('insert into tenant_refresh_job_imports')), 'expected import/job link insert');
+});
+
+test('refreshSnapshots pre-aggregates retailer outstanding instead of using a grouped correlated subquery', async () => {
+  const calls: QueryCall[] = [];
+  const runner = createQueryRunner((sql: string, params?: any[]) => {
+    calls.push({ sql, params: params || [] });
+    return [];
+  });
+  const service = new SupeV1Service({} as any);
+
+  await (service as any).refreshSnapshots(runner, 42);
+
+  const retailerQuery = calls
+    .map((call) => call.sql)
+    .find((sql) => sql.includes('from tenant_outlets to2') && sql.includes('o.id::text as entity_id'));
+
+  assert.ok(retailerQuery, 'expected retailer snapshot query');
+  assert.match(String(retailerQuery), /with retailer_outstanding as/i);
+  assert.match(String(retailerQuery), /left join retailer_outstanding ro on ro\.tenant_outlet_id = to2\.id/i);
+  assert.doesNotMatch(String(retailerQuery), /select sum\(so_all\.outstanding_amount\)/i);
 });
 
 test('refreshTenantState runs analytics-derived refresh before catalog refresh', async () => {
@@ -331,7 +335,7 @@ test('refreshTenantState runs analytics-derived refresh before catalog refresh',
   });
 });
 
-test('processNextQueuedImport completes only after shared refresh succeeds', async () => {
+test('processNextQueuedImport completes imports after canonical writes and queues refresh work separately', async () => {
   const calls: QueryCall[] = [];
   const db = {
     query: async (sql: string, params?: any[]) => {
@@ -340,7 +344,7 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
       if (normalized.includes('with candidate as')) {
         return [{ id: 77 }];
       }
-      if (normalized.includes("select * from import_batches where id = $1 limit 1")) {
+      if (normalized.includes('where ib.id = $1 limit 1')) {
         return [
           {
             id: 77,
@@ -360,6 +364,12 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
             started_at: null,
             completed_at: null,
             processed_by: null,
+            refresh_job_id: null,
+            refresh_status: null,
+            refresh_requested_at: null,
+            refresh_started_at: null,
+            refresh_completed_at: null,
+            refresh_error: null,
             imported_at: '2026-04-03T00:00:00.000Z',
             created_at: '2026-04-03T00:00:00.000Z'
           }
@@ -377,16 +387,24 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
   internal.downloadFromS3 = async () => buildWorkbookBuffer();
   internal.persistOrdersBookRows = async (_tenantId: number, _batchId: number, rows: any[]) => {
     persistedRows = rows;
+    return {
+      id: 700,
+      status: 'QUEUED',
+      requestedAt: '2026-04-03T00:00:10.000Z',
+      startedAt: null,
+      completedAt: null,
+      error: null
+    };
   };
   internal.refreshTenantState = async () => {
     refreshCalled = true;
     return {
-      signalRunId: 55,
+      signalRunId: 1,
       catalog: {
-        refreshedTables: 10,
-        refreshedColumns: 20,
-        refreshedRelationships: 5,
-        refreshedAliases: 7
+        refreshedTables: 1,
+        refreshedColumns: 1,
+        refreshedRelationships: 1,
+        refreshedAliases: 1
       }
     };
   };
@@ -395,24 +413,16 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
 
   assert.equal(result, true);
   assert.equal(persistedRows.length, 1);
-  assert.equal(refreshCalled, true);
+  assert.equal(refreshCalled, false);
 
   const normalizedQueries = calls.map((call) => normalizeSql(call.sql));
-  const importedUpdateIndex = normalizedQueries.findIndex(
-    (sql) => sql.includes("set total_rows = $2") && sql.includes("notes = 'refresh_tenant_state'")
-  );
-  const completedUpdateIndex = normalizedQueries.findIndex((sql) => sql.includes("set import_status = 'completed'"));
-  assert.ok(importedUpdateIndex >= 0, 'expected imported status update');
-  assert.ok(completedUpdateIndex > importedUpdateIndex, 'expected completed status update after imported status update');
-  const intermediateCall = calls[importedUpdateIndex];
-  assert.equal(intermediateCall.params[0], 77);
-  assert.equal(intermediateCall.params[1], 1);
-  assert.equal(intermediateCall.params[2], ORDERS_BOOK_HEADERS.length);
-  assert.match(String(intermediateCall.sql), /import_status = 'PROCESSING'/);
-  assert.match(String(intermediateCall.sql), /notes = 'refresh_tenant_state'/);
-  const completedCall = calls[completedUpdateIndex];
-  assert.match(String(completedCall.params[1]), /signal_run=55/);
-  assert.match(String(completedCall.params[1]), /catalog_tables=10/);
+  const completedUpdate = calls.find((call) => normalizeSql(call.sql).includes("set total_rows = $2") && normalizeSql(call.sql).includes("import_status = 'completed'"));
+  assert.ok(completedUpdate, 'expected completed batch update');
+  assert.equal(completedUpdate?.params[0], 77);
+  assert.equal(completedUpdate?.params[1], 1);
+  assert.equal(completedUpdate?.params[2], ORDERS_BOOK_HEADERS.length);
+  assert.match(String(completedUpdate?.params[3]), /refresh queued/);
+  assert.ok(!normalizedQueries.some((sql) => sql.includes('post_import_failed')), 'expected no inline post-import failure path');
 });
 
 test('processNextQueuedImport tolerates raw driver update-return shapes', async () => {
@@ -424,7 +434,7 @@ test('processNextQueuedImport tolerates raw driver update-return shapes', async 
       if (normalized.includes('with candidate as')) {
         return [[{ id: '79' }], 1];
       }
-      if (normalized.includes("select * from import_batches where id = $1 limit 1")) {
+      if (normalized.includes('where ib.id = $1 limit 1')) {
         return [
           {
             id: 79,
@@ -444,6 +454,12 @@ test('processNextQueuedImport tolerates raw driver update-return shapes', async 
             started_at: null,
             completed_at: null,
             processed_by: null,
+            refresh_job_id: null,
+            refresh_status: null,
+            refresh_requested_at: null,
+            refresh_started_at: null,
+            refresh_completed_at: null,
+            refresh_error: null,
             imported_at: '2026-04-03T00:00:00.000Z',
             created_at: '2026-04-03T00:00:00.000Z'
           }
@@ -456,15 +472,13 @@ test('processNextQueuedImport tolerates raw driver update-return shapes', async 
   const service = new SupeV1Service(db as any);
   const internal = service as any;
   internal.downloadFromS3 = async () => buildWorkbookBuffer();
-  internal.persistOrdersBookRows = async () => {};
-  internal.refreshTenantState = async () => ({
-    signalRunId: 56,
-    catalog: {
-      refreshedTables: 2,
-      refreshedColumns: 3,
-      refreshedRelationships: 4,
-      refreshedAliases: 5
-    }
+  internal.persistOrdersBookRows = async () => ({
+    id: 701,
+    status: 'QUEUED',
+    requestedAt: null,
+    startedAt: null,
+    completedAt: null,
+    error: null
   });
 
   const result = await service.processNextQueuedImport('worker-variant');
@@ -479,39 +493,11 @@ test('processNextQueuedImport tolerates raw driver update-return shapes', async 
   assert.ok(phaseNoteCall, 'expected claimed phase note update for nested update-return shape');
 });
 
-test('processNextQueuedImport marks the batch failed when shared refresh fails after persistence', async () => {
-  const calls: QueryCall[] = [];
+test('processNextQueuedRefreshJob finalizes successful refresh jobs', async () => {
   const db = {
-    query: async (sql: string, params?: any[]) => {
-      calls.push({ sql, params: params || [] });
-      const normalized = normalizeSql(sql);
-      if (normalized.includes('with candidate as')) {
-        return [{ id: 88 }];
-      }
-      if (normalized.includes("select * from import_batches where id = $1 limit 1")) {
-        return [
-          {
-            id: 88,
-            tenant_id: 42,
-            source_file_name: 'orders.xlsx',
-            source_file_type: 'xlsx',
-            source_sheet_name: 'orders_book',
-            file_checksum: 'abc',
-            file_object_key: 'imports/tenant-42/orders.xlsx',
-            total_rows: 1,
-            total_columns: ORDERS_BOOK_HEADERS.length,
-            valid_rows: 0,
-            rejected_rows: 0,
-            error_count: 0,
-            import_status: 'QUEUED',
-            notes: null,
-            started_at: null,
-            completed_at: null,
-            processed_by: null,
-            imported_at: '2026-04-03T00:00:00.000Z',
-            created_at: '2026-04-03T00:00:00.000Z'
-          }
-        ];
+    query: async (sql: string) => {
+      if (normalizeSql(sql).includes("from tenant_refresh_jobs") && normalizeSql(sql).includes("status = 'queued'")) {
+        return [{ id: 91, tenant_id: 42 }];
       }
       return [];
     }
@@ -519,21 +505,95 @@ test('processNextQueuedImport marks the batch failed when shared refresh fails a
 
   const service = new SupeV1Service(db as any);
   const internal = service as any;
-  internal.downloadFromS3 = async () => buildWorkbookBuffer();
-  internal.persistOrdersBookRows = async () => {};
+  let finalizedArgs: any[] | null = null;
+
+  internal.refreshTenantState = async () => ({
+    signalRunId: 55,
+    catalog: {
+      refreshedTables: 10,
+      refreshedColumns: 20,
+      refreshedRelationships: 5,
+      refreshedAliases: 7
+    }
+  });
+  internal.finalizeRefreshJob = async (...args: any[]) => {
+    finalizedArgs = args;
+  };
+
+  const result = await service.processNextQueuedRefreshJob('refresh-worker-1');
+
+  assert.equal(result, true);
+  assert.deepEqual(finalizedArgs, [91, 'COMPLETED', null]);
+});
+
+test('processNextQueuedRefreshJob records failed refresh jobs without failing completed imports', async () => {
+  const db = {
+    query: async (sql: string) => {
+      if (normalizeSql(sql).includes("from tenant_refresh_jobs") && normalizeSql(sql).includes("status = 'queued'")) {
+        return [{ id: 92, tenant_id: 42 }];
+      }
+      return [];
+    }
+  };
+
+  const service = new SupeV1Service(db as any);
+  const internal = service as any;
+  let finalizedArgs: any[] | null = null;
+
   internal.refreshTenantState = async () => {
     throw new Error('catalog refresh failed');
   };
+  internal.finalizeRefreshJob = async (...args: any[]) => {
+    finalizedArgs = args;
+  };
 
-  await assert.rejects(() => service.processNextQueuedImport('worker-2'), /catalog refresh failed/);
+  const result = await service.processNextQueuedRefreshJob('refresh-worker-2');
 
-  const errorInsert = calls.find((call) => normalizeSql(call.sql).includes('insert into import_batch_errors'));
-  assert.ok(errorInsert, 'expected import batch error insert');
-  assert.equal(errorInsert?.params[5], 'post_import');
+  assert.equal(result, true);
+  assert.deepEqual(finalizedArgs, [92, 'FAILED', 'catalog refresh failed']);
+});
 
-  const failedUpdate = calls.find((call) => normalizeSql(call.sql).includes("set valid_rows = 0"));
-  assert.ok(failedUpdate, 'expected failed batch status update');
-  assert.equal(failedUpdate?.params[3], 'post_import_failed: catalog refresh failed');
+test('listImports preserves old imports with no linked refresh job', async () => {
+  const service = new SupeV1Service({
+    query: async () => [
+      {
+        id: 501,
+        tenant_id: 42,
+        source_file_name: 'legacy.xlsx',
+        source_file_type: 'xlsx',
+        source_sheet_name: 'orders_book',
+        file_checksum: null,
+        file_object_key: 'imports/tenant-42/legacy.xlsx',
+        total_rows: 10,
+        total_columns: ORDERS_BOOK_HEADERS.length,
+        valid_rows: 10,
+        rejected_rows: 0,
+        error_count: 0,
+        import_status: 'COMPLETED',
+        notes: 'legacy import',
+        started_at: '2026-04-03T00:00:00.000Z',
+        completed_at: '2026-04-03T00:00:05.000Z',
+        processed_by: 'worker-1',
+        refresh_job_id: null,
+        refresh_status: null,
+        refresh_requested_at: null,
+        refresh_started_at: null,
+        refresh_completed_at: null,
+        refresh_error: null,
+        imported_at: '2026-04-03T00:00:00.000Z',
+        created_at: '2026-04-03T00:00:00.000Z'
+      }
+    ]
+  } as any);
+  const internal = service as any;
+  internal.resolveTenantId = async () => 42;
+
+  const rows = await service.listImports(undefined, 20);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 501);
+  assert.equal(rows[0].refreshJobId, null);
+  assert.equal(rows[0].refreshStatus, null);
 });
 
 test('failImportBatch still marks the batch failed when error detail persistence fails', async () => {
