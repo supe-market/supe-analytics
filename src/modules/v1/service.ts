@@ -2917,6 +2917,17 @@ export class SupeV1Service {
       return false;
     }
 
+    const t0 = Date.now();
+    const phase = async (name: string) => {
+      console.log(`[import:${batchId}] phase=${name} elapsed_ms=${Date.now() - t0}`);
+      try {
+        await this.db.query(`update import_batches set notes = $2 where id = $1`, [batchId, name]);
+      } catch (err) {
+        console.log(`[import:${batchId}] phase-note-update-failed`, err);
+      }
+    };
+    await phase('claimed');
+
     const batch = await this.getImportBatchById(batchId);
     if (!batch?.fileObjectKey) {
       await this.failImportBatch(
@@ -2932,10 +2943,14 @@ export class SupeV1Service {
     let parsedRows: OrdersBookRow[] = [];
     let headers: string[] = [];
     try {
+      await phase('s3_download');
       const buffer = await this.downloadFromS3(batch.fileObjectKey);
+      console.log(`[import:${batchId}] s3_download_done bytes=${buffer.length}`);
+      await phase('parse_workbook');
       const parsed = this.parseOrdersBook(buffer, batch.sourceFileName);
       headers = parsed.headers;
       parsedRows = parsed.rows;
+      console.log(`[import:${batchId}] parse_workbook_done rows=${parsedRows.length} cols=${headers.length}`);
     } catch (error: any) {
       await this.failImportBatch(
         batchId,
@@ -2947,14 +2962,18 @@ export class SupeV1Service {
       throw error;
     }
 
+    await phase('validate_rows');
     const validationErrors = this.validateOrdersBook(headers, parsedRows);
+    console.log(`[import:${batchId}] validate_rows_done errors=${validationErrors.length}`);
     if (validationErrors.length) {
       await this.failImportBatch(batchId, 'Import validation failed', validationErrors, 'validation', parsedRows.length);
       return true;
     }
 
     try {
+      await phase('persist_rows');
       await this.persistOrdersBookRows(batch.tenantId, batchId, parsedRows);
+      console.log(`[import:${batchId}] persist_rows_done`);
       await this.db.query(
         `
         update import_batches
@@ -2981,7 +3000,9 @@ export class SupeV1Service {
     }
 
     try {
+      await phase('refresh_tenant_state');
       const postImport = await this.refreshTenantState(batch.tenantId, workerId);
+      console.log(`[import:${batchId}] refresh_tenant_state_done elapsed_ms=${Date.now() - t0}`);
       await this.db.query(
         `
         update import_batches
