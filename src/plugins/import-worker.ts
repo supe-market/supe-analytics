@@ -13,6 +13,17 @@ export function registerImportWorker(app: FastifyInstance): void {
   const concurrency = Math.max(1, env.IMPORT_WORKER_CONCURRENCY);
   const intervalIds: NodeJS.Timeout[] = [];
   const workerToken = randomUUID().slice(0, 8);
+  const stuckTimeoutMinutes = Number(process.env.IMPORT_STUCK_TIMEOUT_MINUTES || 15);
+
+  // Periodically auto-fail any batch that has been PROCESSING longer than the
+  // configured timeout so the UI stops polling forever and the operator can
+  // retry.
+  const sweeperId = setInterval(() => {
+    void service.sweepStuckImports(stuckTimeoutMinutes).catch((err) => {
+      app.log.error({ err }, 'import sweeper failed');
+    });
+  }, 60_000);
+  intervalIds.push(sweeperId);
 
   for (let index = 0; index < concurrency; index += 1) {
     let running = false;

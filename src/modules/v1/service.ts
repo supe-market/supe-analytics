@@ -3058,6 +3058,58 @@ export class SupeV1Service {
     };
   }
 
+  async cancelImport(user: IAuthUser | undefined, importId: number): Promise<{ cancelled: boolean }> {
+    // Soft-cancel: only QUEUED or PROCESSING batches can be stopped. The worker
+    // has no in-process kill switch for an in-flight tick — for truly stuck
+    // workers an operator must restart the analytics container, after which
+    // the stuck-batch sweeper will see this row is already FAILED.
+    const tenantId = await this.resolveTenantId(user);
+    const result = await this.db.query(
+      `
+      update import_batches
+      set import_status = 'FAILED',
+          notes = coalesce(notes, '') || ' [cancelled by user]',
+          completed_at = now(),
+          error_count = greatest(error_count, 1)
+      where id = $1
+        and tenant_id = $2
+        and import_status in ('QUEUED', 'PROCESSING', 'IMPORTED')
+      returning id
+      `,
+      [importId, tenantId]
+    );
+    if (!result.length) {
+      throw Object.assign(
+        new Error('Import not found or already in a terminal state'),
+        { statusCode: 404 }
+      );
+    }
+    return { cancelled: true };
+  }
+
+  async sweepStuckImports(timeoutMinutes: number): Promise<number> {
+    // Mark any PROCESSING batch older than the timeout as FAILED so the UI
+    // stops polling forever and the user can retry.
+    const result = await this.db.query(
+      `
+      update import_batches
+      set import_status = 'FAILED',
+          notes = coalesce(notes, '') || ' [auto-failed: stuck > ' || $1 || ' min]',
+          completed_at = now(),
+          error_count = greatest(error_count, 1)
+      where import_status in ('PROCESSING', 'IMPORTED')
+        and started_at is not null
+        and started_at < now() - ($1 || ' minutes')::interval
+      returning id
+      `,
+      [timeoutMinutes]
+    );
+    if (result.length) {
+      console.log(`[import-sweeper] auto-failed ${result.length} stuck batch(es)`);
+    }
+    return result.length;
+  }
+
   private async latestSnapshotDate(tenantId: number): Promise<string | null> {
     const rows = await this.db.query(`select max(snapshot_date) as latest_date from entity_metric_snapshots where tenant_id = $1`, [tenantId]);
     return toDateOnly(rows[0]?.latest_date) || null;

@@ -102,6 +102,14 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  app.post('/imports/:id/cancel', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      const result = await service.cancelImport(request.user, Number(params.id));
+      reply.status(200).send({ success: true, data: result });
+    });
+  });
+
   app.get('/observe/summary', { preHandler: app.authenticate }, async (request, reply) => {
     await routeWrap(reply, async () => {
       const data = await service.getObserveSummary(request.user);
