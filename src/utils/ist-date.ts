@@ -49,16 +49,22 @@ export function daysBetweenDates(fromDate: string, toDate: string): number {
   return Math.max(Math.floor(diff / DAY_IN_MS), 0);
 }
 
-export function getDateParts(value: string): {
+export function getDateParts(value: string | Date): {
   year: number;
   month: number;
   day: number;
   daysInMonth: number;
   quarter: number;
 } {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const str = value instanceof Date ? formatDateOnly(value) : String(value);
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {
-    throw new Error(`Invalid date value: ${value}`);
+    // Handle Date.toString() format e.g. "Wed Apr 08 2026 00:00:00 GMT+0000"
+    const parsed = new Date(str);
+    if (isNaN(parsed.getTime())) {
+      throw new Error(`Invalid date value: ${value}`);
+    }
+    return getDateParts(formatDateOnly(parsed));
   }
 
   const year = Number(match[1]);
