@@ -2702,6 +2702,20 @@ export class SupeV1Service {
       ) on commit drop
       `
     );
+
+    // Indexes on the stage table to speed up all the upsert joins.
+    const idx = (suffix: string, cols: string) =>
+      runner.query(`create index ${stageTable}_${suffix} on ${stageTable} (${cols})`);
+    await Promise.all([
+      idx('distributor_code', 'distributor_code'),
+      idx('beat_code', 'beat_code'),
+      idx('salesman_code', 'salesman_code'),
+      idx('outlet_code', 'external_outlet_code, tenant_outlet_code'),
+      idx('brand_code', 'brand_code'),
+      idx('sku_code', 'sku_code'),
+      idx('order_identity', 'external_invoice_no, external_order_id'),
+      idx('payment_amount', 'payment_amount, payment_external_ref')
+    ]);
   }
 
   private orderIdentitySql(alias: string): string {
