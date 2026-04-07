@@ -2664,52 +2664,88 @@ export class SupeV1Service {
         await this.insertCanonicalLineage(runner, 'sales_orders', salesOrderId, rawRecordId, 'order');
 
         const lineId = this.readOrdersBookText(row, 'sales_order_items.external_line_id');
-        const salesOrderItemRows = await runner.query(
+        const existingSalesOrderItemRows = await runner.query(
           `
-          insert into sales_order_items (
-            sales_order_id, sku_id, external_line_id, ordered_quantity, rate, discount_amount, discount_percent,
-            sgst_percent, sgst_amount, cgst_percent, cgst_amount, igst_percent, igst_amount, tax_amount, amount,
-            first_source_record_id, latest_source_record_id
-          )
-          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
-          on conflict (sales_order_id, external_line_id)
-          do update set
-            sku_id = excluded.sku_id,
-            ordered_quantity = excluded.ordered_quantity,
-            rate = excluded.rate,
-            discount_amount = excluded.discount_amount,
-            discount_percent = excluded.discount_percent,
-            sgst_percent = excluded.sgst_percent,
-            sgst_amount = excluded.sgst_amount,
-            cgst_percent = excluded.cgst_percent,
-            cgst_amount = excluded.cgst_amount,
-            igst_percent = excluded.igst_percent,
-            igst_amount = excluded.igst_amount,
-            tax_amount = excluded.tax_amount,
-            amount = excluded.amount,
-            latest_source_record_id = excluded.latest_source_record_id
-          returning id
+          select id from sales_order_items
+          where sales_order_id = $1 and external_line_id = $2
+          limit 1
           `,
-          [
-            salesOrderId,
-            skuId,
-            lineId,
-            this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
-            this.readOrdersBookNumber(row, 'sales_order_items.rate'),
-            this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
-            this.readOrdersBookNumber(row, 'sales_order_items.discount_percent'),
-            this.readOrdersBookNumber(row, 'sales_order_items.sgst_percent'),
-            this.readOrdersBookNumber(row, 'sales_order_items.sgst_amount'),
-            this.readOrdersBookNumber(row, 'sales_order_items.cgst_percent'),
-            this.readOrdersBookNumber(row, 'sales_order_items.cgst_amount'),
-            this.readOrdersBookNumber(row, 'sales_order_items.igst_percent'),
-            this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
-            this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
-            this.readOrdersBookNumber(row, 'sales_order_items.amount'),
-            rawRecordId
-          ]
+          [salesOrderId, lineId]
         );
-        const salesOrderItemId = Number(salesOrderItemRows[0].id);
+
+        let salesOrderItemId: number;
+        if (existingSalesOrderItemRows.length) {
+          salesOrderItemId = Number(existingSalesOrderItemRows[0].id);
+          await runner.query(
+            `
+            update sales_order_items
+            set sku_id = $2,
+                ordered_quantity = $3,
+                rate = $4,
+                discount_amount = $5,
+                discount_percent = $6,
+                sgst_percent = $7,
+                sgst_amount = $8,
+                cgst_percent = $9,
+                cgst_amount = $10,
+                igst_percent = $11,
+                igst_amount = $12,
+                tax_amount = $13,
+                amount = $14,
+                latest_source_record_id = $15,
+                updated_at = now()
+            where id = $1
+            `,
+            [
+              salesOrderItemId,
+              skuId,
+              this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
+              this.readOrdersBookNumber(row, 'sales_order_items.rate'),
+              this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.discount_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.sgst_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.sgst_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.cgst_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.cgst_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.igst_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.amount'),
+              rawRecordId
+            ]
+          );
+        } else {
+          const salesOrderItemRows = await runner.query(
+            `
+            insert into sales_order_items (
+              sales_order_id, sku_id, external_line_id, ordered_quantity, rate, discount_amount, discount_percent,
+              sgst_percent, sgst_amount, cgst_percent, cgst_amount, igst_percent, igst_amount, tax_amount, amount,
+              first_source_record_id, latest_source_record_id
+            )
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
+            returning id
+            `,
+            [
+              salesOrderId,
+              skuId,
+              lineId,
+              this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
+              this.readOrdersBookNumber(row, 'sales_order_items.rate'),
+              this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.discount_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.sgst_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.sgst_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.cgst_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.cgst_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.igst_percent'),
+              this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
+              this.readOrdersBookNumber(row, 'sales_order_items.amount'),
+              rawRecordId
+            ]
+          );
+          salesOrderItemId = Number(salesOrderItemRows[0].id);
+        }
         await this.insertCanonicalLineage(runner, 'sales_order_items', salesOrderItemId, rawRecordId, 'line_item');
 
         const paymentAmount = this.readOrdersBookNumber(row, 'order_payments.amount');

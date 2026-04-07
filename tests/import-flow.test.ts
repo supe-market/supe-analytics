@@ -226,6 +226,59 @@ test('persistOrdersBookRows touches the canonical tables for a valid row', async
   }
 });
 
+test('persistOrdersBookRows updates existing line items without relying on on conflict', async () => {
+  const calls: QueryCall[] = [];
+  const runner = createQueryRunner((sql: string, params?: any[]) => {
+    calls.push({ sql, params: params || [] });
+    const normalized = normalizeSql(sql);
+    if (normalized.includes('insert into raw_records')) return [{ id: 1 }];
+    if (normalized.includes('insert into distributors')) return [{ id: 11 }];
+    if (normalized.includes('insert into beats')) return [{ id: 12 }];
+    if (normalized.includes('insert into salesmen')) return [{ id: 13 }];
+    if (normalized.includes('select to2.id as tenant_outlet_id')) return [];
+    if (normalized.includes('insert into outlets')) return [{ id: 14 }];
+    if (normalized.startsWith('update outlets')) return [];
+    if (normalized.includes('insert into tenant_outlets')) return [{ id: 15 }];
+    if (normalized.startsWith('update beat_outlets')) return [];
+    if (normalized.includes('insert into beat_outlets')) return [];
+    if (normalized.includes('select id from brands where tenant_id = $1 and brand_code')) return [];
+    if (normalized.includes('select id from brands where tenant_id = $1 and lower(brand_name)')) return [];
+    if (normalized.includes('insert into brands')) return [{ id: 16 }];
+    if (normalized.includes('insert into skus')) return [{ id: 17 }];
+    if (normalized.includes('select id from sales_orders where tenant_id = $1 and external_invoice_no')) return [{ id: 18 }];
+    if (normalized.startsWith('update sales_orders')) return [];
+    if (normalized.includes('insert into canonical_record_sources')) return [];
+    if (normalized.includes('select id from sales_order_items where sales_order_id = $1 and external_line_id = $2')) return [{ id: 19 }];
+    if (normalized.startsWith('update sales_order_items')) return [];
+    return [];
+  });
+
+  const db = {
+    createQueryRunner: () => runner
+  };
+  const service = new SupeV1Service(db as any);
+
+  await (service as any).persistOrdersBookRows(42, 7, [
+    buildValidOrdersBookRow({
+      'order_payments.amount': ''
+    })
+  ]);
+
+  const seenSql = calls.map((call) => normalizeSql(call.sql));
+  assert.ok(
+    seenSql.some((sql) => sql.startsWith('update sales_order_items')),
+    'expected existing line item update'
+  );
+  assert.ok(
+    !seenSql.some((sql) => sql.includes('insert into sales_order_items')),
+    'expected no sales_order_items insert when the line already exists'
+  );
+  assert.ok(
+    !seenSql.some((sql) => sql.includes('on conflict (sales_order_id, external_line_id)')),
+    'expected no on conflict usage for sales_order_items'
+  );
+});
+
 test('refreshTenantState runs analytics-derived refresh before catalog refresh', async () => {
   const db = {
     query: async (sql: string) => {
