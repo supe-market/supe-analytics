@@ -2169,6 +2169,23 @@ export class SupeV1Service {
     );
   }
 
+  private normalizeReturnedRows<T = Record<string, any>>(result: any): T[] {
+    if (!Array.isArray(result)) {
+      return [];
+    }
+    if (result.length === 2 && Array.isArray(result[0]) && typeof result[1] === 'number') {
+      return result[0] as T[];
+    }
+    return result as T[];
+  }
+
+  private normalizedReturnedRowCount(result: any): number {
+    if (Array.isArray(result) && result.length === 2 && Array.isArray(result[0]) && typeof result[1] === 'number') {
+      return result[1];
+    }
+    return this.normalizeReturnedRows(result).length;
+  }
+
   private importBatchSummaryFromRow(row: any): ImportBatchSummary {
     return {
       id: Number(row.id),
@@ -2894,7 +2911,7 @@ export class SupeV1Service {
   }
 
   async processNextQueuedImport(workerId: string): Promise<boolean> {
-    const rows = await this.db.query(
+    const rawResult = await this.db.query(
       `
       with candidate as (
         select id
@@ -2916,12 +2933,14 @@ export class SupeV1Service {
       `,
       [workerId]
     );
+    const rows = this.normalizeReturnedRows<{ id?: number | string; b_id?: number | string; 'b.id'?: number | string }>(rawResult);
+    const claimedRowCount = this.normalizedReturnedRowCount(rawResult);
 
     const rawBatchId = rows[0]?.id ?? rows[0]?.b_id ?? rows[0]?.['b.id'] ?? 0;
     const batchId = Number(rawBatchId || 0);
     if (!batchId) {
-      if (rows[0]) {
-        console.log('[import-worker] claimed batch but could not resolve batch id', rows[0]);
+      if (claimedRowCount > 0) {
+        console.log('[import-worker] claimed batch but could not resolve batch id', rawResult);
       }
       return false;
     }
@@ -3073,7 +3092,7 @@ export class SupeV1Service {
     // workers an operator must restart the analytics container, after which
     // the stuck-batch sweeper will see this row is already FAILED.
     const tenantId = await this.resolveTenantId(user);
-    const result = await this.db.query(
+    const rawResult = await this.db.query(
       `
       update import_batches
       set import_status = 'FAILED',
@@ -3087,7 +3106,8 @@ export class SupeV1Service {
       `,
       [importId, tenantId]
     );
-    if (!result.length) {
+    const rows = this.normalizeReturnedRows(rawResult);
+    if (!rows.length) {
       throw Object.assign(
         new Error('Import not found or already in a terminal state'),
         { statusCode: 404 }
@@ -3099,7 +3119,7 @@ export class SupeV1Service {
   async sweepStuckImports(timeoutMinutes: number): Promise<number> {
     // Mark any PROCESSING batch older than the timeout as FAILED so the UI
     // stops polling forever and the user can retry.
-    const result = await this.db.query(
+    const rawResult = await this.db.query(
       `
       update import_batches
       set import_status = 'FAILED',
@@ -3113,10 +3133,11 @@ export class SupeV1Service {
       `,
       [timeoutMinutes]
     );
-    if (result.length) {
-      console.log(`[import-sweeper] auto-failed ${result.length} stuck batch(es)`);
+    const rows = this.normalizeReturnedRows(rawResult);
+    if (rows.length) {
+      console.log(`[import-sweeper] auto-failed ${rows.length} stuck batch(es)`);
     }
-    return result.length;
+    return rows.length;
   }
 
   private async latestSnapshotDate(tenantId: number): Promise<string | null> {

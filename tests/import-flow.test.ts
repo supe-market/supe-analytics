@@ -362,14 +362,14 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
   assert.match(String(completedCall.params[1]), /catalog_tables=10/);
 });
 
-test('processNextQueuedImport tolerates raw driver batch id field variants', async () => {
+test('processNextQueuedImport tolerates raw driver update-return shapes', async () => {
   const calls: QueryCall[] = [];
   const db = {
     query: async (sql: string, params?: any[]) => {
       calls.push({ sql, params: params || [] });
       const normalized = normalizeSql(sql);
       if (normalized.includes('with candidate as')) {
-        return [{ b_id: 79 }];
+        return [[{ id: '79' }], 1];
       }
       if (normalized.includes("select * from import_batches where id = $1 limit 1")) {
         return [
@@ -423,7 +423,7 @@ test('processNextQueuedImport tolerates raw driver batch id field variants', asy
       call.params[0] === 79 &&
       call.params[1] === 'claimed'
   );
-  assert.ok(phaseNoteCall, 'expected claimed phase note update for variant batch id field');
+  assert.ok(phaseNoteCall, 'expected claimed phase note update for nested update-return shape');
 });
 
 test('processNextQueuedImport marks the batch failed when shared refresh fails after persistence', async () => {
@@ -518,7 +518,7 @@ test('sweepStuckImports only auto-fails processing batches', async () => {
   const db = {
     query: async (sql: string, params?: any[]) => {
       calls.push({ sql, params: params || [] });
-      return [{ id: 101 }];
+      return [[{ id: 101 }], 1];
     }
   };
 
@@ -529,4 +529,16 @@ test('sweepStuckImports only auto-fails processing batches', async () => {
   assert.equal(calls.length, 1);
   assert.match(String(calls[0].sql), /where import_status = 'PROCESSING'/);
   assert.doesNotMatch(String(calls[0].sql), /IMPORTED/);
+});
+
+test('cancelImport treats nested update-return shape with zero rows as not found', async () => {
+  const db = {
+    query: async () => [[/* rows */], 0]
+  };
+
+  const service = new SupeV1Service(db as any);
+  const internal = service as any;
+  internal.resolveTenantId = async () => 42;
+
+  await assert.rejects(() => service.cancelImport(undefined, 999), /Import not found or already in a terminal state/);
 });
