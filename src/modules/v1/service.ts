@@ -2716,6 +2716,7 @@ export class SupeV1Service {
       idx('order_identity', 'external_invoice_no, external_order_id'),
       idx('payment_amount', 'payment_amount, payment_external_ref')
     ]);
+    await runner.query(`analyze ${stageTable}`);
   }
 
   private orderIdentitySql(alias: string): string {
