@@ -83,7 +83,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     await routeWrap(reply, async () => {
       // Generate the template on-the-fly from the canonical header list so it
       // can never drift from what the importer accepts.
-      const worksheet = XLSX.utils.aoa_to_sheet([ORDERS_BOOK_HEADERS]);
+      const worksheet = XLSX.utils.aoa_to_sheet([[...ORDERS_BOOK_HEADERS]]);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'orders_book');
       const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
