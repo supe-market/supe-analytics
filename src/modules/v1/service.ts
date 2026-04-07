@@ -2147,7 +2147,12 @@ export class SupeV1Service {
     phase: ImportErrorPhase,
     rejectedRows: number
   ): Promise<void> {
-    await this.insertImportErrors(batchId, errors, phase);
+    try {
+      await this.insertImportErrors(batchId, errors, phase);
+    } catch (error) {
+      console.log(`[import:${batchId}] insert_import_errors_failed phase=${phase}`, error);
+      summary = `${summary} (error details unavailable)`;
+    }
     await this.db.query(
       `
       update import_batches
@@ -2982,8 +2987,8 @@ export class SupeV1Service {
             valid_rows = $2,
             rejected_rows = 0,
             error_count = 0,
-            import_status = 'IMPORTED',
-            notes = null
+            import_status = 'PROCESSING',
+            notes = 'refresh_tenant_state'
         where id = $1
         `,
         [batchId, parsedRows.length, headers.length]
@@ -3097,7 +3102,7 @@ export class SupeV1Service {
           notes = coalesce(notes, '') || ' [auto-failed: stuck > ' || $1 || ' min]',
           completed_at = now(),
           error_count = greatest(error_count, 1)
-      where import_status in ('PROCESSING', 'IMPORTED')
+      where import_status = 'PROCESSING'
         and started_at is not null
         and started_at < now() - ($1 || ' minutes')::interval
       returning id

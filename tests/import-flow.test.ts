@@ -154,7 +154,7 @@ test('createImport queues a valid workbook', async () => {
     assert.deepEqual(result, {
       batchId: 99,
       status: 'QUEUED',
-      totalRows: 1,
+      totalRows: 0,
       totalColumns: ORDERS_BOOK_HEADERS.length
     });
     assert.equal(uploadedArgs?.[0], 'tenant-42');
@@ -345,10 +345,18 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
   assert.equal(refreshCalled, true);
 
   const normalizedQueries = calls.map((call) => normalizeSql(call.sql));
-  const importedUpdateIndex = normalizedQueries.findIndex((sql) => sql.includes("set valid_rows = $2"));
+  const importedUpdateIndex = normalizedQueries.findIndex(
+    (sql) => sql.includes("set total_rows = $2") && sql.includes("notes = 'refresh_tenant_state'")
+  );
   const completedUpdateIndex = normalizedQueries.findIndex((sql) => sql.includes("set import_status = 'completed'"));
   assert.ok(importedUpdateIndex >= 0, 'expected imported status update');
   assert.ok(completedUpdateIndex > importedUpdateIndex, 'expected completed status update after imported status update');
+  const intermediateCall = calls[importedUpdateIndex];
+  assert.equal(intermediateCall.params[0], 77);
+  assert.equal(intermediateCall.params[1], 1);
+  assert.equal(intermediateCall.params[2], ORDERS_BOOK_HEADERS.length);
+  assert.match(String(intermediateCall.sql), /import_status = 'PROCESSING'/);
+  assert.match(String(intermediateCall.sql), /notes = 'refresh_tenant_state'/);
   const completedCall = calls[completedUpdateIndex];
   assert.match(String(completedCall.params[1]), /signal_run=55/);
   assert.match(String(completedCall.params[1]), /catalog_tables=10/);
@@ -409,4 +417,52 @@ test('processNextQueuedImport marks the batch failed when shared refresh fails a
   const failedUpdate = calls.find((call) => normalizeSql(call.sql).includes("set valid_rows = 0"));
   assert.ok(failedUpdate, 'expected failed batch status update');
   assert.equal(failedUpdate?.params[3], 'post_import_failed: catalog refresh failed');
+});
+
+test('failImportBatch still marks the batch failed when error detail persistence fails', async () => {
+  const calls: QueryCall[] = [];
+  const db = {
+    query: async (sql: string, params?: any[]) => {
+      calls.push({ sql, params: params || [] });
+      if (normalizeSql(sql).includes('insert into import_batch_errors')) {
+        throw new Error('detail insert failed');
+      }
+      return [];
+    }
+  };
+
+  const service = new SupeV1Service(db as any);
+
+  await (service as any).failImportBatch(
+    91,
+    'Import validation failed',
+    [{ sNo: '1', rowNumber: 2, column: 'sku', message: 'bad sku' }],
+    'validation',
+    1
+  );
+
+  const failedUpdate = calls.find((call) => normalizeSql(call.sql).includes("set valid_rows = 0"));
+  assert.ok(failedUpdate, 'expected failed batch status update');
+  assert.equal(failedUpdate?.params[0], 91);
+  assert.equal(failedUpdate?.params[1], 1);
+  assert.equal(failedUpdate?.params[2], 1);
+  assert.match(String(failedUpdate?.params[3]), /error details unavailable/);
+});
+
+test('sweepStuckImports only auto-fails processing batches', async () => {
+  const calls: QueryCall[] = [];
+  const db = {
+    query: async (sql: string, params?: any[]) => {
+      calls.push({ sql, params: params || [] });
+      return [{ id: 101 }];
+    }
+  };
+
+  const service = new SupeV1Service(db as any);
+  const count = await service.sweepStuckImports(15);
+
+  assert.equal(count, 1);
+  assert.equal(calls.length, 1);
+  assert.match(String(calls[0].sql), /where import_status = 'PROCESSING'/);
+  assert.doesNotMatch(String(calls[0].sql), /IMPORTED/);
 });
