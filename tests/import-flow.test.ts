@@ -362,6 +362,70 @@ test('processNextQueuedImport completes only after shared refresh succeeds', asy
   assert.match(String(completedCall.params[1]), /catalog_tables=10/);
 });
 
+test('processNextQueuedImport tolerates raw driver batch id field variants', async () => {
+  const calls: QueryCall[] = [];
+  const db = {
+    query: async (sql: string, params?: any[]) => {
+      calls.push({ sql, params: params || [] });
+      const normalized = normalizeSql(sql);
+      if (normalized.includes('with candidate as')) {
+        return [{ b_id: 79 }];
+      }
+      if (normalized.includes("select * from import_batches where id = $1 limit 1")) {
+        return [
+          {
+            id: 79,
+            tenant_id: 42,
+            source_file_name: 'orders.xlsx',
+            source_file_type: 'xlsx',
+            source_sheet_name: 'orders_book',
+            file_checksum: 'abc',
+            file_object_key: 'imports/tenant-42/orders.xlsx',
+            total_rows: 1,
+            total_columns: ORDERS_BOOK_HEADERS.length,
+            valid_rows: 0,
+            rejected_rows: 0,
+            error_count: 0,
+            import_status: 'QUEUED',
+            notes: null,
+            started_at: null,
+            completed_at: null,
+            processed_by: null,
+            imported_at: '2026-04-03T00:00:00.000Z',
+            created_at: '2026-04-03T00:00:00.000Z'
+          }
+        ];
+      }
+      return [];
+    }
+  };
+
+  const service = new SupeV1Service(db as any);
+  const internal = service as any;
+  internal.downloadFromS3 = async () => buildWorkbookBuffer();
+  internal.persistOrdersBookRows = async () => {};
+  internal.refreshTenantState = async () => ({
+    signalRunId: 56,
+    catalog: {
+      refreshedTables: 2,
+      refreshedColumns: 3,
+      refreshedRelationships: 4,
+      refreshedAliases: 5
+    }
+  });
+
+  const result = await service.processNextQueuedImport('worker-variant');
+
+  assert.equal(result, true);
+  const phaseNoteCall = calls.find(
+    (call) =>
+      normalizeSql(call.sql) === 'update import_batches set notes = $2 where id = $1' &&
+      call.params[0] === 79 &&
+      call.params[1] === 'claimed'
+  );
+  assert.ok(phaseNoteCall, 'expected claimed phase note update for variant batch id field');
+});
+
 test('processNextQueuedImport marks the batch failed when shared refresh fails after persistence', async () => {
   const calls: QueryCall[] = [];
   const db = {

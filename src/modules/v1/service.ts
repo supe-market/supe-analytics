@@ -2912,13 +2912,17 @@ export class SupeV1Service {
           notes = 'processing'
       from candidate
       where b.id = candidate.id
-      returning b.id
+      returning b.id as id
       `,
       [workerId]
     );
 
-    const batchId = Number(rows[0]?.id || 0);
+    const rawBatchId = rows[0]?.id ?? rows[0]?.b_id ?? rows[0]?.['b.id'] ?? 0;
+    const batchId = Number(rawBatchId || 0);
     if (!batchId) {
+      if (rows[0]) {
+        console.log('[import-worker] claimed batch but could not resolve batch id', rows[0]);
+      }
       return false;
     }
 
