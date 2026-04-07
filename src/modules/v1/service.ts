@@ -1907,15 +1907,35 @@ export class SupeV1Service {
     }
 
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-    if (!workbook.SheetNames.includes('orders_book')) {
-      throw new Error('Sheet "orders_book" is required');
+    // Sheet name is not enforced — use the workbook's first sheet so the user
+    // can name the tab whatever they like. Column names are the contract.
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      throw new Error('Workbook contains no sheets');
     }
-
-    const worksheet = workbook.Sheets.orders_book;
+    const worksheet = workbook.Sheets[sheetName];
     const headerRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false, blankrows: false });
     const headers = (headerRows[0] || []).map((value) => String(value || '').trim());
     const rows = XLSX.utils.sheet_to_json<OrdersBookRow>(worksheet, { defval: '', raw: false });
     return { headers, rows };
+  }
+
+  private parseOrdersBookHeaders(buffer: Buffer, filename: string): string[] {
+    const lower = filename.toLowerCase();
+    if (!lower.endsWith('.xlsx')) {
+      throw new Error('Only .xlsx files are supported for imports');
+    }
+
+    // sheetRows: 2 limits the parser to the header row + a sentinel — orders of
+    // magnitude faster than reading the full workbook on a 10MB+ file.
+    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, sheetRows: 2 });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      throw new Error('Workbook contains no sheets');
+    }
+    const worksheet = workbook.Sheets[sheetName];
+    const headerRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false, blankrows: false });
+    return (headerRows[0] || []).map((value) => String(value || '').trim());
   }
 
   private validateOrdersBook(headers: string[], rows: OrdersBookRow[]): ImportRowError[] {
@@ -2062,7 +2082,7 @@ export class SupeV1Service {
   private async createImportBatchRecord(payload: {
     tenantId: number;
     sourceFileName: string;
-    fileChecksum: string;
+    fileChecksum: string | null;
     fileObjectKey: string | null;
     totalRows: number;
     totalColumns: number;
@@ -2133,6 +2153,7 @@ export class SupeV1Service {
       update import_batches
       set valid_rows = 0,
           rejected_rows = $2,
+          total_rows = greatest(total_rows, $2),
           error_count = $3,
           import_status = 'FAILED',
           notes = $4,
@@ -2791,14 +2812,13 @@ export class SupeV1Service {
     const tenantId = await this.resolveTenantId(user);
     const tenantCode = this.resolveTenantCode(user);
     const buffer = await file.toBuffer();
-    const checksum = createHash('sha256').update(buffer).digest('hex');
 
+    // Header-only parse keeps the request path fast on large workbooks. Full
+    // row parsing, checksumming, and per-row validation happen in the worker
+    // after the file lands in object storage.
     let headers: string[] = [];
-    let rows: OrdersBookRow[] = [];
     try {
-      const parsed = this.parseOrdersBook(buffer, file.filename);
-      headers = parsed.headers;
-      rows = parsed.rows;
+      headers = this.parseOrdersBookHeaders(buffer, file.filename);
     } catch (error: any) {
       const parseErrors: ImportRowError[] = [
         {
@@ -2811,7 +2831,7 @@ export class SupeV1Service {
       const batchId = await this.createImportBatchRecord({
         tenantId,
         sourceFileName: file.filename,
-        fileChecksum: checksum,
+        fileChecksum: null,
         fileObjectKey: null,
         totalRows: 0,
         totalColumns: 0,
@@ -2827,18 +2847,18 @@ export class SupeV1Service {
       throw validationError;
     }
 
-    const prevalidationErrors = this.validateOrdersBookStructure(headers, rows);
+    const prevalidationErrors = this.validateOrdersBookStructure(headers, [{} as OrdersBookRow]);
     if (prevalidationErrors.length) {
       const batchId = await this.createImportBatchRecord({
         tenantId,
         sourceFileName: file.filename,
-        fileChecksum: checksum,
+        fileChecksum: null,
         fileObjectKey: null,
-        totalRows: rows.length,
+        totalRows: 0,
         totalColumns: headers.length,
         importStatus: 'FAILED',
         notes: 'Import prevalidation failed',
-        rejectedRows: rows.length,
+        rejectedRows: 0,
         errorCount: prevalidationErrors.length,
         completedAt: true
       });
@@ -2848,13 +2868,14 @@ export class SupeV1Service {
       throw validationError;
     }
 
+    // Header validated — now persist to S3 and queue the batch.
     const objectKey = await this.uploadToS3(tenantCode, file.filename, buffer, file.mimetype);
     const batchId = await this.createImportBatchRecord({
       tenantId,
       sourceFileName: file.filename,
-      fileChecksum: checksum,
+      fileChecksum: null,
       fileObjectKey: objectKey,
-      totalRows: rows.length,
+      totalRows: 0,
       totalColumns: headers.length,
       importStatus: 'QUEUED'
     });
@@ -2862,7 +2883,7 @@ export class SupeV1Service {
     return {
       batchId,
       status: 'QUEUED',
-      totalRows: rows.length,
+      totalRows: 0,
       totalColumns: headers.length
     };
   }
@@ -2937,14 +2958,16 @@ export class SupeV1Service {
       await this.db.query(
         `
         update import_batches
-        set valid_rows = $2,
+        set total_rows = $2,
+            total_columns = $3,
+            valid_rows = $2,
             rejected_rows = 0,
             error_count = 0,
             import_status = 'IMPORTED',
             notes = null
         where id = $1
         `,
-        [batchId, parsedRows.length]
+        [batchId, parsedRows.length, headers.length]
       );
     } catch (error: any) {
       await this.failImportBatch(

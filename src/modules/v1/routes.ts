@@ -4,11 +4,10 @@
  * This module maps validated HTTP payloads onto `SupeV1Service` operations and
  * keeps endpoint-level error formatting consistent.
  */
-import { readFile } from 'fs/promises';
-import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
-import { SupeV1Service } from './service';
+import * as XLSX from 'xlsx';
+import { ORDERS_BOOK_HEADERS, SupeV1Service } from './service';
 import {
   actionEventSchema,
   actionsListQuerySchema,
@@ -82,11 +81,15 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
 
   app.get('/imports/template', { preHandler: app.authenticate }, async (_request, reply) => {
     await routeWrap(reply, async () => {
-      const templatePath = path.resolve(process.cwd(), 'docs/templates/customer-data-template.xlsx');
-      const buffer = await readFile(templatePath);
+      // Generate the template on-the-fly from the canonical header list so it
+      // can never drift from what the importer accepts.
+      const worksheet = XLSX.utils.aoa_to_sheet([ORDERS_BOOK_HEADERS]);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'orders_book');
+      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
       reply
         .type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        .header('content-disposition', 'attachment; filename="customer-data-template.xlsx"')
+        .header('content-disposition', 'attachment; filename="orders_book_template.xlsx"')
         .send(buffer);
     });
   });
