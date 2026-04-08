@@ -289,6 +289,11 @@ type RefreshJobSummary = {
   error: string | null;
 };
 
+type ImportPublishResult = {
+  refreshJobId: number | null;
+  signalRunId: number;
+};
+
 const IMPORT_STAGE_COLUMNS: Array<keyof NormalizedOrdersBookRow> = [
   'source_row_number',
   's_no',
@@ -1541,6 +1546,15 @@ export class SupeV1Service {
         where tenant_id = $1
           and tenant_outlet_id is not null
         group by tenant_outlet_id
+      ),
+      retailer_history as (
+        select
+          tenant_outlet_id,
+          max(order_sale_date) as last_order_date
+        from sales_orders
+        where tenant_id = $1
+          and tenant_outlet_id is not null
+        group by tenant_outlet_id
       )
       select
         o.id::text as entity_id,
@@ -1550,7 +1564,7 @@ export class SupeV1Service {
         count(distinct so.id) as orders_mtd,
         coalesce(sum(so.outstanding_amount), 0) as mtd_outstanding,
         coalesce(max(ro.total_outstanding), 0) as total_outstanding,
-        max(so.order_sale_date) as last_order_date
+        max(rh.last_order_date) as last_order_date
       from tenant_outlets to2
       join outlets o on o.id = to2.outlet_id
       left join sales_orders so
@@ -1558,6 +1572,7 @@ export class SupeV1Service {
         and so.tenant_id = $1
         and so.order_sale_date between $2::date and $3::date
       left join retailer_outstanding ro on ro.tenant_outlet_id = to2.id
+      left join retailer_history rh on rh.tenant_outlet_id = to2.id
       where to2.tenant_id = $1 and to2.active = true
       group by to2.id, o.id, o.outlet_name, o.zone, o.region, o.area
       `,
@@ -3786,6 +3801,56 @@ export class SupeV1Service {
     }
   }
 
+  private async createInlineRefreshJob(
+    runner: QueryRunner,
+    tenantId: number,
+    batchId: number
+  ): Promise<RefreshJobSummary> {
+    const rows = await runner.query(
+      `
+      insert into tenant_refresh_jobs (
+        tenant_id,
+        status,
+        started_at,
+        trigger_metadata
+      )
+      values ($1, 'RUNNING', now(), $2::jsonb)
+      returning id, status, requested_at, started_at, completed_at, error_text
+      `,
+      [tenantId, JSON.stringify({ trigger: 'inline_import_refresh', importBatchId: batchId })]
+    );
+    const refreshJob = this.refreshJobSummaryFromRow(rows[0]);
+    await runner.query(
+      `
+      insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+      values ($1, $2)
+      on conflict (import_batch_id)
+      do update set refresh_job_id = excluded.refresh_job_id
+      `,
+      [refreshJob.id, batchId]
+    );
+    return refreshJob;
+  }
+
+  private async finalizeInlineRefreshJob(
+    runner: QueryRunner,
+    refreshJobId: number,
+    status: 'COMPLETED' | 'FAILED',
+    errorText: string | null
+  ): Promise<void> {
+    await runner.query(
+      `
+      update tenant_refresh_jobs
+      set status = $2,
+          error_text = $3,
+          completed_at = now(),
+          updated_at = now()
+      where id = $1
+      `,
+      [refreshJobId, status, errorText]
+    );
+  }
+
   private async finalizeRefreshJob(jobId: number, status: 'COMPLETED' | 'FAILED', errorText: string | null): Promise<void> {
     const runner = this.db.createQueryRunner();
     await runner.connect();
@@ -3853,8 +3918,11 @@ export class SupeV1Service {
   private async persistOrdersBookRows(
     tenantId: number,
     batchId: number,
-    rows: NormalizedOrdersBookRow[]
-  ): Promise<RefreshJobSummary> {
+    rows: NormalizedOrdersBookRow[],
+    triggeredBy: string
+  ): Promise<ImportPublishResult> {
+    await this.seedStaticData(tenantId);
+
     const runner = this.db.createQueryRunner();
     const stageTable = this.stageTableName(batchId);
     await runner.connect();
@@ -3891,11 +3959,26 @@ export class SupeV1Service {
       await this.upsertOrderPaymentsFromStage(runner, stageTable, tenantId);
       console.log(`[import:${batchId}] upsert_payments_done`);
 
-      const refreshJob = await this.attachImportToRefreshJob(runner, tenantId, batchId);
-      console.log(`[import:${batchId}] refresh_job_queued job_id=${refreshJob.id} status=${refreshJob.status}`);
+      const refreshJob = await this.createInlineRefreshJob(runner, tenantId, batchId);
+      console.log(`[import:${batchId}] refresh_job_started job_id=${refreshJob.id} status=${refreshJob.status}`);
+
+      await this.refreshSnapshots(runner, tenantId);
+      console.log(`[import:${batchId}] refresh_snapshots_done`);
+
+      const signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
+      console.log(`[import:${batchId}] refresh_signals_done signal_run=${signalRunId}`);
+
+      await this.recomputeTargetProgressInternal(runner, tenantId);
+      console.log(`[import:${batchId}] refresh_targets_done`);
+
+      await this.finalizeInlineRefreshJob(runner, refreshJob.id, 'COMPLETED', null);
+      console.log(`[import:${batchId}] refresh_job_completed job_id=${refreshJob.id}`);
 
       await runner.commitTransaction();
-      return refreshJob;
+      return {
+        refreshJobId: refreshJob.id,
+        signalRunId
+      };
     } catch (error) {
       await runner.rollbackTransaction();
       throw error;
@@ -4110,7 +4193,7 @@ export class SupeV1Service {
 
     try {
       await phase('persist_rows');
-      const refreshJob = await this.persistOrdersBookRows(batch.tenantId, batchId, normalizedRows);
+      const publishResult = await this.persistOrdersBookRows(batch.tenantId, batchId, normalizedRows, workerId);
       console.log(`[import:${batchId}] persist_rows_done`);
       await this.db.query(
         `
@@ -4129,7 +4212,9 @@ export class SupeV1Service {
           batchId,
           normalizedRows.length,
           headers.length,
-          refreshJob.status === 'RUNNING' ? `Import committed; refresh running (#${refreshJob.id})` : `Import committed; refresh queued (#${refreshJob.id})`
+          publishResult.refreshJobId
+            ? `Import committed; analytics refreshed (#${publishResult.refreshJobId})`
+            : 'Import committed; analytics refreshed'
         ]
       );
     } catch (error: any) {
@@ -5217,7 +5302,11 @@ export class SupeV1Service {
                 order by count(*) desc, coalesce(b.beat_name, '-') asc
               ) as rn
             from tenant_outlets to2
-            left join beats b on b.id = to2.beat_id
+            left join beat_outlets bo
+              on bo.tenant_id = to2.tenant_id
+             and bo.outlet_id = to2.outlet_id
+             and bo.active = true
+            left join beats b on b.id = bo.beat_id
             where to2.tenant_id = $1 and to2.active = true and to2.salesman_id is not null
             group by to2.salesman_id, coalesce(b.beat_name, '-')
           ) ranked

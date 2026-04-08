@@ -169,20 +169,18 @@ test('createImport queues a valid workbook', async () => {
   }
 });
 
-test('persistOrdersBookRows uses bulk stage queries and queues a refresh job without raw lineage writes', async () => {
+test('persistOrdersBookRows uses bulk stage queries and refreshes analytics inline without raw lineage writes', async () => {
   const calls: QueryCall[] = [];
   const runner = createQueryRunner((sql: string, params?: any[]) => {
     calls.push({ sql, params: params || [] });
     const normalized = normalizeSql(sql);
-    if (normalized.includes("from tenant_refresh_jobs") && normalized.includes("status = 'queued'")) return [];
-    if (normalized.includes("from tenant_refresh_jobs") && normalized.includes("status = 'running'")) return [];
     if (normalized.includes('insert into tenant_refresh_jobs')) {
       return [
         {
           id: 501,
-          status: 'QUEUED',
+          status: 'RUNNING',
           requested_at: '2026-04-03T00:00:00.000Z',
-          started_at: null,
+          started_at: '2026-04-03T00:00:00.000Z',
           completed_at: null,
           error_text: null
         }
@@ -196,17 +194,33 @@ test('persistOrdersBookRows uses bulk stage queries and queues a refresh job wit
   } as any);
   const internal = service as any;
   let copiedRows: any[] = [];
+  let seededTenantId = 0;
+  let snapshotsRefreshed = false;
+  let targetsRecomputed = false;
 
   internal.copyRowsIntoImportStage = async (_runner: unknown, _stageTable: string, rows: any[]) => {
     copiedRows = rows;
   };
+  internal.seedStaticData = async (tenantId: number) => {
+    seededTenantId = tenantId;
+  };
+  internal.refreshSnapshots = async () => {
+    snapshotsRefreshed = true;
+  };
+  internal.evaluateSignalsInternal = async () => 77;
+  internal.recomputeTargetProgressInternal = async () => {
+    targetsRecomputed = true;
+  };
 
   const normalizedRows = internal.normalizeOrdersBookRows([buildValidOrdersBookRow()]);
-  const refreshJob = await internal.persistOrdersBookRows(42, 7, normalizedRows);
+  const publishResult = await internal.persistOrdersBookRows(42, 7, normalizedRows, 'worker-1');
 
   assert.equal(copiedRows.length, 1);
-  assert.equal(refreshJob.id, 501);
-  assert.equal(refreshJob.status, 'QUEUED');
+  assert.equal(seededTenantId, 42);
+  assert.equal(snapshotsRefreshed, true);
+  assert.equal(targetsRecomputed, true);
+  assert.equal(publishResult.refreshJobId, 501);
+  assert.equal(publishResult.signalRunId, 77);
 
   const seenSql = calls.map((call) => normalizeSql(call.sql));
   const expectedFragments = [
@@ -221,7 +235,8 @@ test('persistOrdersBookRows uses bulk stage queries and queues a refresh job wit
     'insert into sales_order_items',
     'insert into order_payments',
     'insert into tenant_refresh_jobs',
-    'insert into tenant_refresh_job_imports'
+    'insert into tenant_refresh_job_imports',
+    "update tenant_refresh_jobs set status = $2"
   ];
 
   for (const fragment of expectedFragments) {
@@ -279,7 +294,9 @@ test('refreshSnapshots pre-aggregates retailer outstanding instead of using a gr
 
   assert.ok(retailerQuery, 'expected retailer snapshot query');
   assert.match(String(retailerQuery), /with retailer_outstanding as/i);
+  assert.match(String(retailerQuery), /retailer_history as/i);
   assert.match(String(retailerQuery), /left join retailer_outstanding ro on ro\.tenant_outlet_id = to2\.id/i);
+  assert.match(String(retailerQuery), /left join retailer_history rh on rh\.tenant_outlet_id = to2\.id/i);
   assert.doesNotMatch(String(retailerQuery), /select sum\(so_all\.outstanding_amount\)/i);
 });
 
@@ -380,7 +397,39 @@ test('evaluateSignalsInternal normalizes snapshot dates before building SQL date
   assert.equal(snapshotQuery?.params?.[4], '2026-04-08');
 });
 
-test('processNextQueuedImport completes imports after canonical writes and queues refresh work separately', async () => {
+test('listObserveEntity salesman route query resolves beats through beat_outlets', async () => {
+  const calls: QueryCall[] = [];
+  const db = {
+    query: async (sql: string, params?: any[]) => {
+      calls.push({ sql, params: params || [] });
+      const normalized = normalizeSql(sql);
+      if (normalized.includes('select max(snapshot_date) as latest_date from entity_metric_snapshots')) {
+        return [{ latest_date: '2026-03-27' }];
+      }
+      if (normalized.includes('select max(snapshot_date) as snapshot_date from entity_metric_snapshots where tenant_id = $1 and snapshot_date <= $2::date')) {
+        return [{ snapshot_date: '2026-02-27' }];
+      }
+      if (normalized.includes('from salesmen s') && normalized.includes('route_candidates as')) {
+        return [];
+      }
+      return [];
+    }
+  };
+
+  const service = new SupeV1Service(db as any);
+  (service as any).resolveTenantId = async () => 42;
+  await service.listObserveEntity('salesman', undefined, { limit: 50, page: 1, timeRange: 'mtd' });
+
+  const salesmanQuery = calls.find(
+    (call) => normalizeSql(call.sql).includes('from salesmen s') && normalizeSql(call.sql).includes('route_candidates as')
+  );
+  assert.ok(salesmanQuery, 'expected salesman explore query');
+  assert.match(String(salesmanQuery?.sql), /left join beat_outlets bo/i);
+  assert.match(String(salesmanQuery?.sql), /left join beats b on b\.id = bo\.beat_id/i);
+  assert.doesNotMatch(String(salesmanQuery?.sql), /to2\.beat_id/i);
+});
+
+test('processNextQueuedImport completes imports after canonical writes and inline analytics refresh', async () => {
   const calls: QueryCall[] = [];
   const db = {
     query: async (sql: string, params?: any[]) => {
@@ -427,30 +476,13 @@ test('processNextQueuedImport completes imports after canonical writes and queue
   const service = new SupeV1Service(db as any);
   const internal = service as any;
   let persistedRows: any[] = [];
-  let refreshCalled = false;
 
   internal.downloadFromS3 = async () => buildWorkbookBuffer();
-  internal.persistOrdersBookRows = async (_tenantId: number, _batchId: number, rows: any[]) => {
+  internal.persistOrdersBookRows = async (_tenantId: number, _batchId: number, rows: any[], _workerId: string) => {
     persistedRows = rows;
     return {
-      id: 700,
-      status: 'QUEUED',
-      requestedAt: '2026-04-03T00:00:10.000Z',
-      startedAt: null,
-      completedAt: null,
-      error: null
-    };
-  };
-  internal.refreshTenantState = async () => {
-    refreshCalled = true;
-    return {
-      signalRunId: 1,
-      catalog: {
-        refreshedTables: 1,
-        refreshedColumns: 1,
-        refreshedRelationships: 1,
-        refreshedAliases: 1
-      }
+      refreshJobId: 700,
+      signalRunId: 1
     };
   };
 
@@ -458,7 +490,6 @@ test('processNextQueuedImport completes imports after canonical writes and queue
 
   assert.equal(result, true);
   assert.equal(persistedRows.length, 1);
-  assert.equal(refreshCalled, false);
 
   const normalizedQueries = calls.map((call) => normalizeSql(call.sql));
   const completedUpdate = calls.find((call) => normalizeSql(call.sql).includes("set total_rows = $2") && normalizeSql(call.sql).includes("import_status = 'completed'"));
@@ -466,7 +497,7 @@ test('processNextQueuedImport completes imports after canonical writes and queue
   assert.equal(completedUpdate?.params[0], 77);
   assert.equal(completedUpdate?.params[1], 1);
   assert.equal(completedUpdate?.params[2], ORDERS_BOOK_HEADERS.length);
-  assert.match(String(completedUpdate?.params[3]), /refresh queued/);
+  assert.match(String(completedUpdate?.params[3]), /analytics refreshed/);
   assert.ok(!normalizedQueries.some((sql) => sql.includes('post_import_failed')), 'expected no inline post-import failure path');
 });
 
@@ -518,12 +549,8 @@ test('processNextQueuedImport tolerates raw driver update-return shapes', async 
   const internal = service as any;
   internal.downloadFromS3 = async () => buildWorkbookBuffer();
   internal.persistOrdersBookRows = async () => ({
-    id: 701,
-    status: 'QUEUED',
-    requestedAt: null,
-    startedAt: null,
-    completedAt: null,
-    error: null
+    refreshJobId: 701,
+    signalRunId: 1
   });
 
   const result = await service.processNextQueuedImport('worker-variant');
