@@ -1963,14 +1963,14 @@ export class SupeV1Service {
     const latestDateRows = await runner.query(`select max(snapshot_date) as latest_date from entity_metric_snapshots where tenant_id = $1`, [
       tenantId
     ]);
-    const latestDate = latestDateRows[0]?.latest_date;
+    const latestDate = toDateOnly(latestDateRows[0]?.latest_date);
     if (!latestDate) {
       return runToken;
     }
 
     const definitions = await runner.query(`select * from signal_definitions where active = true order by entity_type, signal_key`);
     for (const def of definitions) {
-      const range = this.resolveWindowRange(String(def.window_type || 'MTD'), String(latestDate));
+      const range = this.resolveWindowRange(String(def.window_type || 'MTD'), latestDate);
       const snapshotRows = await runner.query(
         `
         select distinct on (entity_id)

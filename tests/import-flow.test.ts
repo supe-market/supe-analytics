@@ -335,6 +335,51 @@ test('refreshTenantState runs analytics-derived refresh before catalog refresh',
   });
 });
 
+test('evaluateSignalsInternal normalizes snapshot dates before building SQL date windows', async () => {
+  const calls: QueryCall[] = [];
+  const runner = createQueryRunner((sql: string, params?: any[]) => {
+    calls.push({ sql, params: params || [] });
+    const normalized = normalizeSql(sql);
+    if (normalized.includes('select source_key, action_state from entity_signals')) {
+      return [];
+    }
+    if (normalized.includes('delete from entity_signals where tenant_id = $1')) {
+      return [];
+    }
+    if (normalized.includes('select max(snapshot_date) as latest_date from entity_metric_snapshots')) {
+      return [{ latest_date: new Date(Date.UTC(2026, 3, 8)) }];
+    }
+    if (normalized.includes('select * from signal_definitions')) {
+      return [
+        {
+          id: 91,
+          entity_type: 'salesman',
+          metric_key: 'revenue_mtd',
+          signal_key: 'low_revenue',
+          window_type: 'MTD'
+        }
+      ];
+    }
+    if (normalized.includes('from entity_metric_snapshots') && normalized.includes('snapshot_date between $4::date and $5::date')) {
+      return [];
+    }
+    return [];
+  });
+
+  const service = new SupeV1Service({} as any);
+  await (service as any).evaluateSignalsInternal(runner, 42, 'worker-1');
+
+  const snapshotQuery = calls.find(
+    (call) =>
+      normalizeSql(call.sql).includes('from entity_metric_snapshots') &&
+      normalizeSql(call.sql).includes('snapshot_date between $4::date and $5::date')
+  );
+
+  assert.ok(snapshotQuery, 'expected signal snapshot query');
+  assert.equal(snapshotQuery?.params?.[3], '2026-04-01');
+  assert.equal(snapshotQuery?.params?.[4], '2026-04-08');
+});
+
 test('processNextQueuedImport completes imports after canonical writes and queues refresh work separately', async () => {
   const calls: QueryCall[] = [];
   const db = {
