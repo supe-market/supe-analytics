@@ -2444,15 +2444,29 @@ export class SupeV1Service {
 
   private async insertImportErrors(batchId: number, errors: ImportRowError[], phase: ImportErrorPhase): Promise<void> {
     const limitedErrors = errors.slice(0, 1000);
-    for (const error of limitedErrors) {
-      await this.db.query(
-        `
-        insert into import_batch_errors (import_batch_id, row_number, s_no, column_name, message, phase)
-        values ($1,$2,$3,$4,$5,$6)
-        `,
-        [batchId, error.rowNumber, error.sNo, error.column, error.message, phase]
-      );
+    if (!limitedErrors.length) {
+      return;
     }
+
+    const valuesSql = limitedErrors
+      .map(
+        (_, index) =>
+          `($1,$${index * 4 + 2},$${index * 4 + 3},$${index * 4 + 4},$${index * 4 + 5},$${limitedErrors.length * 4 + 2})`
+      )
+      .join(',');
+    const params: Array<number | string> = [batchId];
+    for (const error of limitedErrors) {
+      params.push(error.rowNumber, error.sNo, error.column, error.message);
+    }
+    params.push(phase);
+
+    await this.db.query(
+      `
+      insert into import_batch_errors (import_batch_id, row_number, s_no, column_name, message, phase)
+      values ${valuesSql}
+      `,
+      params
+    );
   }
 
   private async failImportBatch(
@@ -3925,6 +3939,7 @@ export class SupeV1Service {
     const tenantId = await this.resolveTenantId(user);
     const tenantCode = this.resolveTenantCode(user);
     const buffer = await file.toBuffer();
+    const fileChecksum = createHash('sha256').update(buffer).digest('hex');
 
     // Header-only parse keeps the request path fast on large workbooks. Full
     // row parsing, checksumming, and per-row validation happen in the worker
@@ -3944,7 +3959,7 @@ export class SupeV1Service {
       const batchId = await this.createImportBatchRecord({
         tenantId,
         sourceFileName: file.filename,
-        fileChecksum: null,
+        fileChecksum,
         fileObjectKey: null,
         totalRows: 0,
         totalColumns: 0,
@@ -3965,7 +3980,7 @@ export class SupeV1Service {
       const batchId = await this.createImportBatchRecord({
         tenantId,
         sourceFileName: file.filename,
-        fileChecksum: null,
+        fileChecksum,
         fileObjectKey: null,
         totalRows: 0,
         totalColumns: headers.length,
@@ -3986,7 +4001,7 @@ export class SupeV1Service {
     const batchId = await this.createImportBatchRecord({
       tenantId,
       sourceFileName: file.filename,
-      fileChecksum: null,
+      fileChecksum,
       fileObjectKey: objectKey,
       totalRows: 0,
       totalColumns: headers.length,
