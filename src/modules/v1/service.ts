@@ -2452,20 +2452,27 @@ export class SupeV1Service {
       console.log(`[import:${batchId}] insert_import_errors_failed phase=${phase}`, error);
       summary = `${summary} (error details unavailable)`;
     }
-    await this.db.query(
-      `
-      update import_batches
-      set valid_rows = 0,
-          rejected_rows = $2,
-          total_rows = greatest(total_rows, $2),
-          error_count = $3,
-          import_status = 'FAILED',
-          notes = $4,
-          completed_at = now()
-      where id = $1
-      `,
-      [batchId, rejectedRows, errors.length, summary]
-    );
+    // This UPDATE is the safety net — it MUST not throw. If it fails the batch
+    // stays PROCESSING forever and the sweeper is the only recovery path.
+    try {
+      await this.db.query(
+        `
+        update import_batches
+        set valid_rows = 0,
+            rejected_rows = $2,
+            total_rows = greatest(total_rows, $2),
+            error_count = $3,
+            import_status = 'FAILED',
+            notes = $4,
+            completed_at = now()
+        where id = $1
+        `,
+        [batchId, rejectedRows, errors.length, summary]
+      );
+    } catch (error) {
+      // Log and swallow — sweeper will auto-fail after timeout
+      console.log(`[import:${batchId}] fail_batch_update_failed`, error);
+    }
   }
 
   private normalizeReturnedRows<T = Record<string, any>>(result: any): T[] {
@@ -2613,9 +2620,13 @@ export class SupeV1Service {
     }
 
     await pipeline(Readable.from(csvLines(this)), client.query(copyFrom(copySql)));
+    await this.indexImportStageTable(runner, stageTable);
   }
 
   private async createImportStageTable(runner: QueryRunner, stageTable: string): Promise<void> {
+    // Create the temp table with no indexes — we'll bulk-COPY data first and
+    // build indexes afterwards, which is orders of magnitude faster than
+    // maintaining them during the COPY (standard PostgreSQL ETL pattern).
     await runner.query(
       `
       create temp table ${stageTable} (
@@ -2698,14 +2709,38 @@ export class SupeV1Service {
         payment_date date,
         payment_mode text,
         payment_amount numeric(14,2),
-        payment_external_ref text
+        payment_external_ref text,
+
+        -- Pre-computed payment identity used for deduplication. Generated columns
+        -- are populated by Postgres automatically and can be indexed, eliminating
+        -- the need for an un-indexable CASE expression in DISTINCT ON.
+        payment_identity text generated always as (
+          case
+            when payment_external_ref is not null
+              then 'REF:' || payment_external_ref
+            when payment_amount is not null and payment_amount > 0
+              then (
+                case
+                  when external_invoice_no is not null then 'INV:' || external_invoice_no
+                  else 'ORD:' || coalesce(external_order_id, '')
+                end
+              ) || '|DATE:' || coalesce(payment_date::text, '')
+                || '|MODE:' || coalesce(payment_mode, '')
+                || '|AMT:'  || coalesce(payment_amount::text, '')
+            else null
+          end
+        ) stored
       ) on commit drop
       `
     );
+  }
 
-    // Indexes on the stage table to speed up all the upsert joins.
-    const idx = (suffix: string, cols: string) =>
-      runner.query(`create index ${stageTable}_${suffix} on ${stageTable} (${cols})`);
+  private async indexImportStageTable(runner: QueryRunner, stageTable: string): Promise<void> {
+    // Build all indexes after the bulk COPY — this is the industry-standard
+    // PostgreSQL ETL pattern. Building indexes on an empty table and then
+    // maintaining them row-by-row during COPY is 10-100x slower.
+    const idx = (suffix: string, cols: string, extra = '') =>
+      runner.query(`create index ${stageTable}_${suffix} on ${stageTable} (${cols}) ${extra}`);
     await Promise.all([
       idx('distributor_code', 'distributor_code'),
       idx('beat_code', 'beat_code'),
@@ -2714,7 +2749,7 @@ export class SupeV1Service {
       idx('brand_code', 'brand_code'),
       idx('sku_code', 'sku_code'),
       idx('order_identity', 'external_invoice_no, external_order_id'),
-      idx('payment_amount', 'payment_amount, payment_external_ref')
+      idx('payment_identity', 'payment_identity', 'where payment_identity is not null')
     ]);
     await runner.query(`analyze ${stageTable}`);
   }
@@ -3498,28 +3533,29 @@ export class SupeV1Service {
   }
 
   private async upsertOrderPaymentsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
-    const orderIdentity = this.orderIdentitySql('s');
+    // `payment_identity` is a stored generated column on the stage table — it is
+    // pre-computed, stored on disk, and has a partial index (built after COPY).
+    // Using it in DISTINCT ON / ORDER BY lets Postgres use that index instead of
+    // evaluating a bare CASE expression on every row (which forced a full seq-scan).
+    //
+    // Pattern: UPDATE existing rows first, then INSERT only net-new rows.
+    // Both share the same `latest` CTE that de-duplicates via the indexed column.
+
+    // ── 1. UPDATE existing payments ────────────────────────────────────────────
     await runner.query(
       `
       with latest as (
-        select distinct on (
-          case
-            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
-            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
-          end
-        )
-          ${orderIdentity} as order_identity,
+        -- De-duplicate: keep the last-row-wins record for each unique payment.
+        -- DISTINCT ON uses the payment_identity index — no CASE expression at runtime.
+        select distinct on (s.payment_identity)
           s.*
         from ${stageTable} s
-        where s.payment_amount is not null and s.payment_amount > 0
-        order by
-          case
-            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
-            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
-          end,
-          s.source_row_number desc
+        where s.payment_identity is not null
+        order by s.payment_identity, s.source_row_number desc
       ),
       resolved as (
+        -- Join to sales_orders to get the internal sales_order_id.
+        -- idx_sales_orders_tenant_invoice / idx_sales_orders_tenant_order_id are used here.
         select
           latest.*,
           so.id as sales_order_id
@@ -3533,6 +3569,8 @@ export class SupeV1Service {
          )
       ),
       matched as (
+        -- Find existing order_payments rows to update.
+        -- idx_order_payments_tenant_ref and idx_order_payments_composite_match are used here.
         select
           resolved.source_row_number,
           op.id as payment_id
@@ -3555,7 +3593,7 @@ export class SupeV1Service {
       update order_payments op
       set payment_date = resolved.payment_date,
           payment_mode = resolved.payment_mode,
-          amount = resolved.payment_amount,
+          amount       = resolved.payment_amount,
           external_ref = resolved.payment_external_ref
       from resolved
       join matched on matched.source_row_number = resolved.source_row_number
@@ -3564,25 +3602,15 @@ export class SupeV1Service {
       [tenantId]
     );
 
+    // ── 2. INSERT net-new payments ─────────────────────────────────────────────
     await runner.query(
       `
       with latest as (
-        select distinct on (
-          case
-            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
-            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
-          end
-        )
-          ${orderIdentity} as order_identity,
+        select distinct on (s.payment_identity)
           s.*
         from ${stageTable} s
-        where s.payment_amount is not null and s.payment_amount > 0
-        order by
-          case
-            when s.payment_external_ref is not null then 'REF:' || s.payment_external_ref
-            else ${orderIdentity} || '|DATE:' || coalesce(s.payment_date::text, '') || '|MODE:' || coalesce(s.payment_mode, '') || '|AMOUNT:' || coalesce(s.payment_amount::text, '')
-          end,
-          s.source_row_number desc
+        where s.payment_identity is not null
+        order by s.payment_identity, s.source_row_number desc
       ),
       resolved as (
         select
