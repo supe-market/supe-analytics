@@ -5,3 +5,6 @@ node_modules
 dist
 coverage
 npm-debug.log*
+scripts/verify-import-metrics.mjs
+scripts/workbook-acceptance-harness.ts
+tests/workbook-acceptance-harness.test.ts

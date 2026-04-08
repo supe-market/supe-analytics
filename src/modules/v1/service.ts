@@ -6622,7 +6622,14 @@ export class SupeV1Service {
     const entityFilterClause = selectedEntities.length ? `and entity_id = any($5::text[])` : '';
     const baseRows = await this.db.query(
       `
-      select entity_id, max(entity_name) as entity_name, max(zone) as zone, max(region) as region, max(area) as area, metric_key, metric_value
+      select
+        entity_id,
+        max(entity_name) as entity_name,
+        max(zone) as zone,
+        max(region) as region,
+        max(area) as area,
+        metric_key,
+        max(metric_value) as metric_value
       from entity_metric_snapshots
       where tenant_id = $1
         and entity_type = $2
