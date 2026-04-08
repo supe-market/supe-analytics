@@ -277,6 +277,7 @@ type NormalizedOrdersBookRow = {
   payment_mode: string | null;
   payment_amount: number | null;
   payment_external_ref: string | null;
+  payment_identity: string | null;
 };
 
 type RefreshJobSummary = {
@@ -368,7 +369,8 @@ const IMPORT_STAGE_COLUMNS: Array<keyof NormalizedOrdersBookRow> = [
   'payment_date',
   'payment_mode',
   'payment_amount',
-  'payment_external_ref'
+  'payment_external_ref',
+  'payment_identity'
 ];
 
 const IMPORT_DETAIL_ERROR_LIMIT = 100;
@@ -2150,6 +2152,19 @@ export class SupeV1Service {
         this.nullableText(this.readOrdersBookText(row, 'outlets.region')) || distributor_region;
       const outlet_area =
         this.nullableText(this.readOrdersBookText(row, 'outlets.area')) || distributor_area;
+      const external_invoice_no = this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_invoice_no'));
+      const external_order_id = this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_order_id'));
+      const payment_external_ref = this.nullableText(this.readOrdersBookText(row, 'order_payments.external_ref'));
+      const payment_date = this.readOrdersBookDate(row, 'order_payments.payment_date');
+      const payment_mode = this.nullableText(this.readOrdersBookText(row, 'order_payments.payment_mode'));
+      const payment_amount = this.readOrdersBookNumber(row, 'order_payments.amount');
+      const orderIdentity = external_invoice_no ? `INV:${external_invoice_no}` : `ORD:${external_order_id || ''}`;
+      const payment_identity =
+        payment_external_ref
+          ? `REF:${payment_external_ref}`
+          : payment_amount !== null && payment_amount > 0
+            ? `${orderIdentity}|DATE:${payment_date || ''}|MODE:${payment_mode || ''}|AMT:${String(payment_amount)}`
+            : null;
 
       return {
         source_row_number: index + 2,
@@ -2203,8 +2218,8 @@ export class SupeV1Service {
         sku_amount: this.readOrdersBookNumber(row, 'skus.amount'),
         sku_igst_percent: this.readOrdersBookNumber(row, 'skus.igst_percent'),
         sku_igst_amount: this.readOrdersBookNumber(row, 'skus.igst_amount'),
-        external_order_id: this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_order_id')),
-        external_invoice_no: this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_invoice_no')),
+        external_order_id,
+        external_invoice_no,
         external_awb_no: this.nullableText(this.readOrdersBookText(row, 'sales_orders.external_awb_no')),
         order_punched_at: this.readOrdersBookTimestamp(row, 'sales_orders.order_punched_at'),
         order_sale_date: this.readOrdersBookDate(row, 'sales_orders.order_sale_date'),
@@ -2229,10 +2244,11 @@ export class SupeV1Service {
         line_igst_amount: this.readOrdersBookNumber(row, 'sales_order_items.igst_amount'),
         line_tax_amount: this.readOrdersBookNumber(row, 'sales_order_items.tax_amount'),
         line_amount: this.readOrdersBookNumber(row, 'sales_order_items.amount'),
-        payment_date: this.readOrdersBookDate(row, 'order_payments.payment_date'),
-        payment_mode: this.nullableText(this.readOrdersBookText(row, 'order_payments.payment_mode')),
-        payment_amount: this.readOrdersBookNumber(row, 'order_payments.amount'),
-        payment_external_ref: this.nullableText(this.readOrdersBookText(row, 'order_payments.external_ref'))
+        payment_date,
+        payment_mode,
+        payment_amount,
+        payment_external_ref,
+        payment_identity
       };
     });
   }
@@ -2710,26 +2726,7 @@ export class SupeV1Service {
         payment_mode text,
         payment_amount numeric(14,2),
         payment_external_ref text,
-
-        -- Pre-computed payment identity used for deduplication. Generated columns
-        -- are populated by Postgres automatically and can be indexed, eliminating
-        -- the need for an un-indexable CASE expression in DISTINCT ON.
-        payment_identity text generated always as (
-          case
-            when payment_external_ref is not null
-              then 'REF:' || payment_external_ref
-            when payment_amount is not null and payment_amount > 0
-              then (
-                case
-                  when external_invoice_no is not null then 'INV:' || external_invoice_no
-                  else 'ORD:' || coalesce(external_order_id, '')
-                end
-              ) || '|DATE:' || coalesce(payment_date::text, '')
-                || '|MODE:' || coalesce(payment_mode, '')
-                || '|AMT:'  || coalesce(payment_amount::text, '')
-            else null
-          end
-        ) stored
+        payment_identity text
       ) on commit drop
       `
     );
@@ -3533,8 +3530,8 @@ export class SupeV1Service {
   }
 
   private async upsertOrderPaymentsFromStage(runner: QueryRunner, stageTable: string, tenantId: number): Promise<void> {
-    // `payment_identity` is a stored generated column on the stage table — it is
-    // pre-computed, stored on disk, and has a partial index (built after COPY).
+    // `payment_identity` is pre-computed in Node before COPY and indexed on the
+    // stage table after COPY.
     // Using it in DISTINCT ON / ORDER BY lets Postgres use that index instead of
     // evaluating a bare CASE expression on every row (which forced a full seq-scan).
     //
