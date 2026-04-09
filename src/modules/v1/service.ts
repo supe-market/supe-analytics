@@ -6564,39 +6564,67 @@ export class SupeV1Service {
     }
 
     const requestedMetrics = body.selectedMetrics || body.metrics || ['revenue'];
-    const aliasByDimension: Record<string, Record<string, string>> = {
-      geography: {
-        revenue: 'revenue_mtd',
-        collection: 'collection_mtd',
-        orders: 'orders_mtd',
-        coverage: 'coverage_pct'
-      },
-      distributor: {
-        revenue: 'revenue_mtd',
-        orders: 'orders_mtd',
-        fulfilmentRate: 'fulfilment_pct',
-        damage: 'damage_pct'
-      },
-      sku: {
-        revenue: 'revenue_mtd',
-        qty: 'units_mtd',
-        penetration: 'penetration_pct',
-        growth: 'growth_pct',
-        outlets: 'outlets_mtd'
-      }
+    const metricConfigByDimension: Record<
+      string,
+      Array<{ key: string; dbKey: string; label: string; shortLabel: string; unit: string; higherIsBetter: boolean }>
+    > = {
+      geography: [
+        { key: 'revenue', dbKey: 'revenue_mtd', label: 'Revenue', shortLabel: 'Revenue', unit: 'currency', higherIsBetter: true },
+        { key: 'collection', dbKey: 'collection_mtd', label: 'Collection', shortLabel: 'Collection', unit: 'currency', higherIsBetter: true },
+        { key: 'orders', dbKey: 'orders_mtd', label: 'Orders', shortLabel: 'Orders', unit: 'number', higherIsBetter: true },
+        { key: 'coverage', dbKey: 'coverage_pct', label: 'Coverage', shortLabel: 'Coverage', unit: 'percent', higherIsBetter: true }
+      ],
+      distributor: [
+        { key: 'revenue', dbKey: 'revenue_mtd', label: 'Revenue', shortLabel: 'Revenue', unit: 'currency', higherIsBetter: true },
+        { key: 'orders', dbKey: 'orders_mtd', label: 'Orders', shortLabel: 'Orders', unit: 'number', higherIsBetter: true },
+        { key: 'fulfilmentRate', dbKey: 'fulfilment_pct', label: 'Fulfilment', shortLabel: 'Fulfilment', unit: 'percent', higherIsBetter: true },
+        { key: 'damage', dbKey: 'damage_pct', label: 'Damage', shortLabel: 'Damage', unit: 'percent', higherIsBetter: false }
+      ],
+      sku: [
+        { key: 'revenue', dbKey: 'revenue_mtd', label: 'Revenue', shortLabel: 'Revenue', unit: 'currency', higherIsBetter: true },
+        { key: 'qty', dbKey: 'units_mtd', label: 'Units', shortLabel: 'Units', unit: 'number', higherIsBetter: true },
+        { key: 'penetration', dbKey: 'penetration_pct', label: 'Penetration', shortLabel: 'Penetration', unit: 'percent', higherIsBetter: true },
+        { key: 'growth', dbKey: 'growth_pct', label: 'Growth', shortLabel: 'Growth', unit: 'percent', higherIsBetter: true },
+        { key: 'outlets', dbKey: 'outlets_mtd', label: 'Outlets', shortLabel: 'Outlets', unit: 'number', higherIsBetter: true }
+      ]
     };
-    const metricAlias = aliasByDimension[compareDimension] || {};
-    const selectedMetrics = requestedMetrics.map((metric) => metricAlias[metric] || metric);
-    const reverseMetricAlias = Object.entries(metricAlias).reduce<Record<string, string>>((acc, [uiMetric, dbMetric]) => {
-      acc[dbMetric] = uiMetric;
+    const selectedMetricConfigs = (metricConfigByDimension[compareDimension] || []).filter((metric) => requestedMetrics.includes(metric.key));
+    if (!selectedMetricConfigs.length) {
+      throw new Error('No supported metrics selected for compare');
+    }
+    const selectedMetrics = selectedMetricConfigs.map((metric) => metric.dbKey);
+    const reverseMetricAlias = selectedMetricConfigs.reduce<Record<string, string>>((acc, metric) => {
+      acc[metric.dbKey] = metric.key;
       return acc;
     }, {});
     const selectedEntities = body.selectedEntities || body.entityIds || [];
-    const periodLabel = body.periodLabel || body.timeRange || 'mtd';
+    const periodLabel = 'mtd';
     const snapshotDate = await this.resolveCompareSnapshotDate(tenantId, periodLabel, body.snapshotDate);
     if (!snapshotDate) {
       throw new Error('No snapshot data available');
     }
+
+    const computePercentile = (values: number[], current: number, higherIsBetter = true): number => {
+      if (!values.length) {
+        return 0;
+      }
+      const sorted = [...values].sort((left, right) => (higherIsBetter ? right - left : left - right));
+      const index = sorted.findIndex((value) => value === current);
+      if (index === -1 || sorted.length === 1) {
+        return 100;
+      }
+      return Math.round(((sorted.length - index - 1) / (sorted.length - 1)) * 100);
+    };
+
+    const resolveTone = (percentile: number) => {
+      if (percentile >= 75) {
+        return 'top';
+      }
+      if (percentile <= 25) {
+        return 'bottom';
+      }
+      return 'mid';
+    };
 
     const runRows = await this.db.query(
       `
@@ -6643,56 +6671,101 @@ export class SupeV1Service {
         : [tenantId, compareDimension, snapshotDate, selectedMetrics]
     );
 
-    const perMetric = new Map<string, number[]>();
-    for (const row of baseRows) {
-      const key = String(row.metric_key);
-      const list = perMetric.get(key) || [];
-      list.push(Number(row.metric_value || 0));
-      perMetric.set(key, list);
-    }
-
-    const entityMap = new Map<string, { entityName: string; zone: string | null; region: string | null; area: string | null; metrics: Record<string, number> }>();
+    const entityMap = new Map<
+      string,
+      { entityName: string; zone: string | null; region: string | null; area: string | null; metrics: Record<string, number> }
+    >();
     for (const row of baseRows) {
       const entityId = String(row.entity_id);
-      const existing: { entityName: string; zone: string | null; region: string | null; area: string | null; metrics: Record<string, number> } =
-        entityMap.get(entityId) || {
+      const existing =
+        entityMap.get(entityId) ||
+        ({
           entityName: row.entity_name || entityId,
           zone: row.zone || null,
           region: row.region || null,
           area: row.area || null,
           metrics: {}
-        };
+        } as { entityName: string; zone: string | null; region: string | null; area: string | null; metrics: Record<string, number> });
       const uiMetric = reverseMetricAlias[String(row.metric_key)] || String(row.metric_key);
       existing.metrics[uiMetric] = Number(row.metric_value || 0);
       entityMap.set(entityId, existing);
     }
 
-    const normalizeScore = (values: number[], value: number): number => {
-      if (!values.length) return 0;
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      if (max === min) return 100;
-      return ((value - min) / (max - min)) * 100;
-    };
+    const baseEntities = Array.from(entityMap.entries()).map(([entityId, info]) => ({
+      entityId,
+      entityName: info.entityName,
+      zone: info.zone,
+      region: info.region,
+      area: info.area,
+      metrics: Object.fromEntries(selectedMetricConfigs.map((metric) => [metric.key, Number(info.metrics[metric.key] || 0)]))
+    }));
 
-    const results: any[] = [];
-    for (const [entityId, info] of entityMap.entries()) {
-      let scoreSum = 0;
-      let scoreCount = 0;
-      for (const metricKey of selectedMetrics) {
-        const uiMetric = reverseMetricAlias[metricKey] || metricKey;
-        const metricValues = perMetric.get(metricKey) || [];
-        const value = Number(info.metrics[uiMetric] || 0);
-        const sorted = [...metricValues].sort((a, b) => a - b);
-        const rankIndex = sorted.findIndex((v) => v >= value);
-        const percentile = sorted.length ? ((Math.max(rankIndex, 0) + 1) * 100) / sorted.length : 0;
-        const avg = metricValues.length ? metricValues.reduce((acc, current) => acc + current, 0) / metricValues.length : 0;
-        const top = metricValues.length ? Math.max(...metricValues) : 0;
-        const normalized = normalizeScore(metricValues, value);
-        scoreSum += normalized;
-        scoreCount += 1;
-        const compositeScore = scoreCount ? scoreSum / scoreCount : 0;
+    const metricValuesByUiKey = Object.fromEntries(
+      selectedMetricConfigs.map((metric) => [metric.key, baseEntities.map((entity) => Number(entity.metrics[metric.key] || 0))])
+    ) as Record<string, number[]>;
 
+    const matrixRows = baseEntities
+      .map((entity) => {
+        const metricCards = selectedMetricConfigs.map((metric) => {
+          const values = metricValuesByUiKey[metric.key] || [];
+          const value = Number(entity.metrics[metric.key] || 0);
+          const average = values.length ? values.reduce((sum, current) => sum + current, 0) / values.length : 0;
+          const best = values.length
+            ? metric.higherIsBetter
+              ? Math.max(...values)
+              : Math.min(...values)
+            : 0;
+          const percentile = computePercentile(values, value, metric.higherIsBetter);
+          return {
+            metricKey: metric.key,
+            dbMetricKey: metric.dbKey,
+            label: metric.label,
+            shortLabel: metric.shortLabel,
+            unit: metric.unit,
+            higherIsBetter: metric.higherIsBetter,
+            value,
+            percentile,
+            tone: resolveTone(percentile),
+            indexToAverage: average === 0 ? 0 : (value * 100) / average,
+            gapToAverage: metric.higherIsBetter ? average - value : value - average,
+            gapToTop: metric.higherIsBetter ? best - value : value - best
+          };
+        });
+        const score =
+          metricCards.length > 0 ? Math.round(metricCards.reduce((sum, card) => sum + Number(card.percentile || 0), 0) / metricCards.length) : 0;
+        return {
+          ...entity,
+          score,
+          metricCards
+        };
+      })
+      .sort((left, right) => right.score - left.score || left.entityName.localeCompare(right.entityName))
+      .map((row, index) => ({
+        ...row,
+        rank: index + 1
+      }));
+
+    const metricCardMapByEntity = new Map(
+      matrixRows.map((row) => [
+        row.entityId,
+        Object.fromEntries(row.metricCards.map((card) => [card.metricKey, card]))
+      ])
+    );
+
+    const summary = selectedMetricConfigs.map((metric) => {
+      const values = metricValuesByUiKey[metric.key] || [];
+      return {
+        metricKey: metric.key,
+        label: metric.label,
+        unit: metric.unit,
+        average: values.length ? values.reduce((sum, current) => sum + current, 0) / values.length : 0,
+        min: values.length ? Math.min(...values) : 0,
+        max: values.length ? Math.max(...values) : 0
+      };
+    });
+
+    for (const row of matrixRows) {
+      for (const card of row.metricCards) {
         await this.db.query(
           `
             insert into compare_results (
@@ -6705,54 +6778,228 @@ export class SupeV1Service {
             runId,
             tenantId,
             compareDimension,
-            entityId,
-            info.entityName,
-            info.zone,
-            info.region,
-            info.area,
-            metricKey,
-            value,
-            percentile,
-            avg === 0 ? 0 : (value * 100) / avg,
-            top - value,
-            avg - value,
-            compositeScore,
-            JSON.stringify({})
+            row.entityId,
+            row.entityName,
+            row.zone,
+            row.region,
+            row.area,
+            card.dbMetricKey,
+            card.value,
+            card.percentile,
+            card.indexToAverage,
+            card.gapToTop,
+            card.gapToAverage,
+            row.score,
+            JSON.stringify({ tone: card.tone, higherIsBetter: card.higherIsBetter })
           ]
         );
+      }
+    }
 
-        results.push({
-          runId,
-          entityId,
-          entityName: info.entityName,
-              uiMetric,
-              value,
-              percentile,
-              indexToAverage: avg === 0 ? 0 : (value * 100) / avg,
-          gapToTop: top - value,
-          gapToAverage: avg - value
+    const indexToAverageRows = matrixRows.map((row) => ({
+      entityId: row.entityId,
+      entityName: row.entityName,
+      score: row.score,
+      indices: Object.fromEntries(
+        row.metricCards.map((card) => [
+          card.metricKey,
+          {
+            value: card.value,
+            index: Math.round(card.indexToAverage),
+            deltaFromAverage: card.gapToAverage
+          }
+        ])
+      )
+    }));
+
+    const gapOpportunities = selectedMetricConfigs.map((metric) => {
+      const sorted = [...matrixRows].sort((left, right) =>
+        metric.higherIsBetter
+          ? Number(right.metrics[metric.key] || 0) - Number(left.metrics[metric.key] || 0)
+          : Number(left.metrics[metric.key] || 0) - Number(right.metrics[metric.key] || 0)
+      );
+      const best = sorted[0];
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const worst = sorted[sorted.length - 1];
+      const bestValue = Number(best?.metrics?.[metric.key] || 0);
+      const medianValue = Number(median?.metrics?.[metric.key] || 0);
+      const worstValue = Number(worst?.metrics?.[metric.key] || 0);
+      const reference = metric.higherIsBetter ? Math.max(Math.abs(bestValue), 1) : Math.max(Math.abs(worstValue), 1);
+      return {
+        metricKey: metric.key,
+        label: metric.label,
+        unit: metric.unit,
+        higherIsBetter: metric.higherIsBetter,
+        best: best ? { entityId: best.entityId, entityName: best.entityName, value: bestValue } : null,
+        median: median ? { entityId: median.entityId, entityName: median.entityName, value: medianValue } : null,
+        worst: worst ? { entityId: worst.entityId, entityName: worst.entityName, value: worstValue } : null,
+        spreadPct: Math.abs(((bestValue - worstValue) * 100) / reference),
+        opportunityToMedian: Math.abs(medianValue - worstValue),
+        opportunityToLeader: Math.abs(bestValue - worstValue)
+      };
+    });
+
+    const headToHeadPairs: any[] = [];
+    for (let leftIndex = 0; leftIndex < matrixRows.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < matrixRows.length; rightIndex += 1) {
+        const left = matrixRows[leftIndex];
+        const right = matrixRows[rightIndex];
+        const metricComparisons = selectedMetricConfigs.map((metric) => {
+          const leftValue = Number(left.metrics[metric.key] || 0);
+          const rightValue = Number(right.metrics[metric.key] || 0);
+          const winnerEntityId =
+            leftValue === rightValue
+              ? null
+              : metric.higherIsBetter
+                ? leftValue > rightValue
+                  ? left.entityId
+                  : right.entityId
+                : leftValue < rightValue
+                  ? left.entityId
+                  : right.entityId;
+          return {
+            metricKey: metric.key,
+            label: metric.label,
+            unit: metric.unit,
+            leftValue,
+            rightValue,
+            delta: leftValue - rightValue,
+            winnerEntityId
+          };
+        });
+        const leftWins = metricComparisons.filter((item) => item.winnerEntityId === left.entityId).length;
+        const rightWins = metricComparisons.filter((item) => item.winnerEntityId === right.entityId).length;
+        headToHeadPairs.push({
+          leftEntityId: left.entityId,
+          leftEntityName: left.entityName,
+          rightEntityId: right.entityId,
+          rightEntityName: right.entityName,
+          leftScore: leftWins,
+          rightScore: rightWins,
+          winnerEntityId: leftWins === rightWins ? null : leftWins > rightWins ? left.entityId : right.entityId,
+          metrics: metricComparisons
         });
       }
     }
 
-    const summary = selectedMetrics.map((metric) => {
-      const values = perMetric.get(metric) || [];
-      const uiMetric = reverseMetricAlias[metric] || metric;
+    const trendDateRows = await this.db.query(
+      `
+      select distinct snapshot_date
+      from entity_metric_snapshots
+      where tenant_id = $1
+        and entity_type = $2
+        and metric_key = any($3::text[])
+        and snapshot_date <= $4::date
+        ${selectedEntities.length ? 'and entity_id = any($5::text[])' : ''}
+      order by snapshot_date desc
+      limit 6
+      `,
+      selectedEntities.length
+        ? [tenantId, compareDimension, selectedMetrics, snapshotDate, selectedEntities]
+        : [tenantId, compareDimension, selectedMetrics, snapshotDate]
+    );
+    const trendDates = trendDateRows
+      .map((row: any) => toDateOnly(row.snapshot_date))
+      .filter((value: string | null): value is string => Boolean(value))
+      .reverse();
+
+    const trendRows = trendDates.length
+      ? await this.db.query(
+          `
+          select entity_id, max(entity_name) as entity_name, metric_key, snapshot_date, max(metric_value) as metric_value
+          from entity_metric_snapshots
+          where tenant_id = $1
+            and entity_type = $2
+            and metric_key = any($3::text[])
+            and snapshot_date = any($4::date[])
+            ${selectedEntities.length ? 'and entity_id = any($5::text[])' : ''}
+          group by entity_id, metric_key, snapshot_date
+          order by entity_id, metric_key, snapshot_date asc
+          `,
+          selectedEntities.length
+            ? [tenantId, compareDimension, selectedMetrics, trendDates, selectedEntities]
+            : [tenantId, compareDimension, selectedMetrics, trendDates]
+        )
+      : [];
+
+    const trendMetricRows = selectedMetricConfigs.map((metric) => {
+      const series = matrixRows.map((entity, index) => {
+        const seriesRows = trendRows.filter((row: any) => row.entity_id === entity.entityId && row.metric_key === metric.dbKey);
+        const valueByDate = new Map(seriesRows.map((row: any) => [toDateOnly(row.snapshot_date), Number(row.metric_value || 0)]));
+        const points = trendDates.map((date: string) => ({
+          date,
+          value: Number(valueByDate.get(date) || 0)
+        }));
+        const firstValue = Number(points[0]?.value || 0);
+        const latestValue = Number(points[points.length - 1]?.value || 0);
+        const changePct = firstValue === 0 ? 0 : ((latestValue - firstValue) * 100) / firstValue;
+        const slope = points.length > 1 ? (latestValue - firstValue) / (points.length - 1) : 0;
+        return {
+          entityId: entity.entityId,
+          entityName: entity.entityName,
+          color: index,
+          latestValue,
+          changePct,
+          slope,
+          points
+        };
+      });
+      const latestValues = series.map((item) => item.latestValue);
+      const latestMax = latestValues.length ? Math.max(...latestValues) : 0;
+      const latestMin = latestValues.length ? Math.min(...latestValues) : 0;
+      const spreadReference = Math.max(Math.abs(latestMax), 1);
       return {
-        metric: uiMetric,
-        average: values.length ? values.reduce((acc, current) => acc + current, 0) / values.length : 0,
-        min: values.length ? Math.min(...values) : 0,
-        max: values.length ? Math.max(...values) : 0
+        metricKey: metric.key,
+        label: metric.label,
+        unit: metric.unit,
+        dates: trendDates,
+        spreadPct: Math.abs(((latestMax - latestMin) * 100) / spreadReference),
+        series
       };
     });
 
-    const entities = Array.from(entityMap.entries()).map(([entityId, info]) => ({
-      id: entityId,
-      name: info.entityName,
-      metrics: info.metrics
-    }));
+    const defaultLeftEntityId = matrixRows[0]?.entityId || null;
+    const defaultRightEntityId = matrixRows[1]?.entityId || matrixRows[0]?.entityId || null;
 
-    return { runId, snapshotDate, summary, entities, results };
+    return {
+      runId,
+      snapshotDate,
+      periodLabel: 'MTD',
+      compareDimension,
+      metricDefinitions: selectedMetricConfigs,
+      entities: matrixRows.map((row) => ({
+        id: row.entityId,
+        name: row.entityName,
+        zone: row.zone,
+        region: row.region,
+        area: row.area,
+        metrics: row.metrics
+      })),
+      summary,
+      sections: {
+        performanceMatrix: {
+          rows: matrixRows,
+          legend: {
+            topThreshold: 75,
+            bottomThreshold: 25
+          }
+        },
+        indexToAverage: {
+          averages: Object.fromEntries(summary.map((item) => [item.metricKey, item.average])),
+          rows: indexToAverageRows
+        },
+        gapOpportunities,
+        headToHead: {
+          defaultLeftEntityId,
+          defaultRightEntityId,
+          pairs: headToHeadPairs
+        },
+        trendDivergence: {
+          dates: trendDates,
+          metrics: trendMetricRows
+        }
+      }
+    };
   }
 
   async getCompareRun(user: IAuthUser | undefined, runId: number) {
