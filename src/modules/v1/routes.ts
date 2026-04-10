@@ -25,6 +25,8 @@ import {
   saveComparePresetSchema,
   signalDefaultsSchema,
   signalOverridesSchema,
+  snapshotTimeseriesQuerySchema,
+  targetTrajectoryQuerySchema,
   trajectoryQuerySchema,
   updateActionSchema,
   updateTaskSchema
@@ -336,6 +338,14 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  app.get('/snapshots/timeseries', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const query = parseSchema(snapshotTimeseriesQuerySchema, request.query);
+      const data = await service.getSnapshotTimeseries(request.user, query);
+      reply.status(200).send({ success: true, data });
+    });
+  });
+
   app.get('/targets', { preHandler: app.authenticate }, async (request, reply) => {
     await routeWrap(reply, async () => {
       const data = await service.listTargets(request.user);
@@ -357,6 +367,15 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
       const data = await service.createTargetAssignment(request.user, body);
       await service.recomputeTargets(request.user);
       reply.status(201).send({ success: true, data });
+    });
+  });
+
+  app.get('/targets/assignments/:id/trajectory', { preHandler: app.authenticate }, async (request, reply) => {
+    await routeWrap(reply, async () => {
+      const params = request.params as { id: string };
+      const query = parseSchema(targetTrajectoryQuerySchema, request.query);
+      const data = await service.getTargetTrajectory(request.user, Number(params.id), query);
+      reply.status(200).send({ success: true, data });
     });
   });
 

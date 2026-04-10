@@ -129,6 +129,26 @@ export const trajectoryQuerySchema = z.object({
   granularity: z.enum(['day', 'week', 'month']).optional().default('month')
 });
 
+export const snapshotTimeseriesQuerySchema = z.object({
+  entityType: z.string(),
+  entityIds: z.union([z.string(), z.array(z.string())]).optional(),
+  entityId: z.string().optional(),
+  metricKeys: z.union([z.string(), z.array(z.string())]).optional(),
+  metricKey: z.string().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  granularity: z.enum(['day', 'week', 'month']).optional().default('day'),
+  scopeLevel: z.string().optional(),
+  scopeValue: z.string().optional(),
+  zone: z.string().optional(),
+  region: z.string().optional(),
+  area: z.string().optional()
+});
+
+export const targetTrajectoryQuerySchema = z.object({
+  granularity: z.enum(['day', 'week', 'month']).optional().default('day')
+});
+
 export const createPersonSchema = z.object({
   personCode: z.string().optional(),
   fullName: z.string().min(1),

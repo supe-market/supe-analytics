@@ -28,6 +28,12 @@ type ImportableFile = {
   toBuffer: () => Promise<Buffer>;
 };
 
+type SnapshotRefreshResult = {
+  snapshotDate: string;
+  periodStart: string;
+  periodEnd: string;
+};
+
 const SIGNAL_DEFINITIONS_SEED = [
   ['salesman', 'coverage', 'coverage_pct', 'LT', 'percent', '%', 'MTD', 'warning'],
   ['salesman', 'beat_adherence', 'beat_adherence_pct', 'LT', 'percent', '%', 'MTD', 'warning'],
@@ -477,6 +483,45 @@ function normalizeTargetMetricKey(metricKey?: string | null): string {
   };
 
   return aliases[value] || value;
+}
+
+function normalizeSnapshotMetricKey(metricKey?: string | null): string {
+  const value = String(metricKey || '').trim();
+  const aliases: Record<string, string> = {
+    revenue: 'revenue_mtd',
+    gmv: 'gmv',
+    collection: 'collection_mtd',
+    collections: 'collections',
+    orders: 'orders_mtd',
+    coverage: 'coverage_pct',
+    coverage_pct: 'coverage_pct',
+    beat_adherence: 'beat_adherence_pct',
+    beat_adherence_pct: 'beat_adherence_pct',
+    outstanding: 'outstanding',
+    outstanding_reduction: 'outstanding',
+    fulfilment: 'fulfilment_pct',
+    fulfilmentRate: 'fulfilment_pct',
+    fulfilment_rate: 'fulfilment_pct',
+    damage: 'damage_pct',
+    penetration: 'penetration_pct',
+    growth: 'growth_pct',
+    qty: 'units_mtd',
+    units: 'units_mtd',
+    outlets: 'outlets_mtd'
+  };
+
+  return aliases[value] || aliases[value.toLowerCase()] || value;
+}
+
+function splitQueryList(value: string | string[] | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .flatMap((item) => String(item).split(','))
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function isAggregateTargetEntityTypeSupported(targetKey: string, entityType: string): boolean {
@@ -1406,7 +1451,7 @@ export class SupeV1Service {
     );
   }
 
-  private async refreshSnapshots(runner: QueryRunner, tenantId: number): Promise<void> {
+  private async refreshSnapshots(runner: QueryRunner, tenantId: number): Promise<SnapshotRefreshResult> {
     const range = buildRange();
     await runner.query(`delete from entity_metric_snapshots where tenant_id = $1 and snapshot_date = $2::date`, [
       tenantId,
@@ -1928,6 +1973,12 @@ export class SupeV1Service {
         });
       }
     }
+
+    return {
+      snapshotDate: range.end,
+      periodStart: range.start,
+      periodEnd: range.end
+    };
   }
 
   private evaluateOperator(operator: string, observed: number, threshold: number): boolean {
@@ -3962,13 +4013,13 @@ export class SupeV1Service {
       const refreshJob = await this.createInlineRefreshJob(runner, tenantId, batchId);
       console.log(`[import:${batchId}] refresh_job_started job_id=${refreshJob.id} status=${refreshJob.status}`);
 
-      await this.refreshSnapshots(runner, tenantId);
+      const snapshotRefresh = await this.refreshSnapshots(runner, tenantId);
       console.log(`[import:${batchId}] refresh_snapshots_done`);
 
       const signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
       console.log(`[import:${batchId}] refresh_signals_done signal_run=${signalRunId}`);
 
-      await this.recomputeTargetProgressInternal(runner, tenantId);
+      await this.recomputeTargetProgressInternal(runner, tenantId, snapshotRefresh.snapshotDate);
       console.log(`[import:${batchId}] refresh_targets_done`);
 
       await this.finalizeInlineRefreshJob(runner, refreshJob.id, 'COMPLETED', null);
@@ -3999,9 +4050,9 @@ export class SupeV1Service {
     await runner.startTransaction();
     let signalRunId = 0;
     try {
-      await this.refreshSnapshots(runner, tenant.id);
+      const snapshotRefresh = await this.refreshSnapshots(runner, tenant.id);
       signalRunId = await this.evaluateSignalsInternal(runner, tenant.id, triggeredBy);
-      await this.recomputeTargetProgressInternal(runner, tenant.id);
+      await this.recomputeTargetProgressInternal(runner, tenant.id, snapshotRefresh.snapshotDate);
       await runner.commitTransaction();
     } catch (error) {
       await runner.rollbackTransaction();
@@ -7052,21 +7103,161 @@ export class SupeV1Service {
     return this.db.query(`select * from compare_presets where tenant_id = $1 order by updated_at desc`, [tenantId]);
   }
 
-  async getTrajectory(user: IAuthUser | undefined, query: { entityType: string; entityId: string; metricKey: string }) {
+  async getSnapshotTimeseries(
+    user: IAuthUser | undefined,
+    query: {
+      entityType: string;
+      entityIds?: string | string[];
+      entityId?: string;
+      metricKeys?: string | string[];
+      metricKey?: string;
+      startDate?: string;
+      endDate?: string;
+      granularity?: 'day' | 'week' | 'month';
+      scopeLevel?: string;
+      scopeValue?: string;
+      zone?: string;
+      region?: string;
+      area?: string;
+    }
+  ) {
     const tenantId = await this.resolveTenantId(user);
+    const granularity = query.granularity || 'day';
+    const entityIds = splitQueryList(query.entityIds || query.entityId);
+    const requestedMetricKeys = splitQueryList(query.metricKeys || query.metricKey);
+    const metricKeys = requestedMetricKeys.map((metricKey) => normalizeSnapshotMetricKey(metricKey));
+    if (!metricKeys.length) {
+      throw new Error('metricKeys is required');
+    }
+
+    const bucketExpression =
+      granularity === 'week'
+        ? `date_trunc('week', snapshot_date)::date`
+        : granularity === 'month'
+          ? `date_trunc('month', snapshot_date)::date`
+          : `snapshot_date::date`;
+    const filters: string[] = [`tenant_id = $1`, `entity_type = $2`, `metric_key = any($3::text[])`];
+    const params: any[] = [tenantId, query.entityType, metricKeys];
+
+    if (entityIds.length) {
+      params.push(entityIds);
+      filters.push(`entity_id = any($${params.length}::text[])`);
+    }
+    if (query.startDate) {
+      params.push(query.startDate);
+      filters.push(`snapshot_date >= $${params.length}::date`);
+    }
+    if (query.endDate) {
+      params.push(query.endDate);
+      filters.push(`snapshot_date <= $${params.length}::date`);
+    }
+
+    const scope = normalizeTargetScope(query.scopeLevel, query.scopeValue);
+    const explicitScopeLevel = query.scopeLevel ? scope.scopeLevel : null;
+    if (explicitScopeLevel === 'zone') {
+      params.push(scope.scopeValue);
+      filters.push(`zone = $${params.length}`);
+    } else if (explicitScopeLevel === 'region') {
+      params.push(scope.scopeValue);
+      filters.push(`region = $${params.length}`);
+    } else if (explicitScopeLevel === 'area') {
+      params.push(scope.scopeValue);
+      filters.push(`area = $${params.length}`);
+    }
+    for (const [column, value] of [
+      ['zone', query.zone],
+      ['region', query.region],
+      ['area', query.area]
+    ] as Array<[string, string | undefined]>) {
+      if (value) {
+        params.push(value);
+        filters.push(`${column} = $${params.length}`);
+      }
+    }
+
     const rows = await this.db.query(
       `
-      select snapshot_date, metric_value
-      from entity_metric_snapshots
-      where tenant_id = $1 and entity_type = $2 and entity_id = $3 and metric_key = $4
-      order by snapshot_date asc
+      with ranked as (
+        select
+          ${bucketExpression} as bucket_date,
+          snapshot_date,
+          entity_id,
+          entity_name,
+          metric_key,
+          metric_label,
+          metric_unit,
+          metric_value,
+          row_number() over (
+            partition by entity_id, metric_key, ${bucketExpression}
+            order by snapshot_date desc, id desc
+          ) as row_rank
+        from entity_metric_snapshots
+        where ${filters.join('\n          and ')}
+      )
+      select
+        bucket_date,
+        snapshot_date,
+        entity_id,
+        entity_name,
+        metric_key,
+        metric_label,
+        metric_unit,
+        metric_value
+      from ranked
+      where row_rank = 1
+      order by entity_name, metric_key, bucket_date asc
       `,
-      [tenantId, query.entityType, query.entityId, query.metricKey]
+      params
     );
 
-    const points = rows.map((row: any) => ({
-      date: row.snapshot_date,
-      value: Number(row.metric_value || 0)
+    const seriesMap = new Map<string, any>();
+    for (const row of rows) {
+      const date = toDateOnly(row.bucket_date);
+      const snapshotDate = toDateOnly(row.snapshot_date);
+      if (!date) {
+        continue;
+      }
+      const key = `${row.entity_id}:${row.metric_key}`;
+      const existing =
+        seriesMap.get(key) ||
+        ({
+          entityId: String(row.entity_id),
+          entityName: row.entity_name || row.entity_id,
+          metricKey: row.metric_key,
+          metricLabel: row.metric_label || row.metric_key,
+          metricUnit: row.metric_unit || null,
+          points: []
+        } as any);
+      existing.points.push({
+        date,
+        value: Number(row.metric_value || 0),
+        snapshotDate: snapshotDate || date
+      });
+      seriesMap.set(key, existing);
+    }
+
+    return {
+      entityType: query.entityType,
+      granularity,
+      startDate: query.startDate || null,
+      endDate: query.endDate || null,
+      series: Array.from(seriesMap.values())
+    };
+  }
+
+  async getTrajectory(
+    user: IAuthUser | undefined,
+    query: { entityType: string; entityId: string; metricKey: string; granularity?: 'day' | 'week' | 'month' }
+  ) {
+    const timeseries = await this.getSnapshotTimeseries(user, {
+      entityType: query.entityType,
+      entityIds: [query.entityId],
+      metricKeys: [query.metricKey],
+      granularity: query.granularity || 'month'
+    });
+    const points = (timeseries.series[0]?.points || []).map((point: any) => ({
+      date: point.date,
+      value: Number(point.value || 0)
     }));
     let slope = 0;
     if (points.length > 1) {
@@ -7078,6 +7269,217 @@ export class SupeV1Service {
       metricKey: query.metricKey,
       points,
       slope
+    };
+  }
+
+  async getTargetTrajectory(user: IAuthUser | undefined, targetAssignmentId: number, query: { granularity?: 'day' | 'week' | 'month' }) {
+    const tenantId = await this.resolveTenantId(user);
+    const granularity = query.granularity || 'day';
+    const assignmentRows = await this.db.query(
+      `
+      select
+        ta.*,
+        td.target_key,
+        td.metric_key,
+        td.display_name as metric_label,
+        td.metric_unit,
+        td.comparison_operator,
+        p.full_name,
+        p.person_code
+      from target_assignments ta
+      join target_definitions td on td.id = ta.target_definition_id
+      join people p on p.id = ta.person_id
+      where ta.tenant_id = $1 and ta.id = $2
+      limit 1
+      `,
+      [tenantId, targetAssignmentId]
+    );
+    const assignment = assignmentRows[0];
+    if (!assignment) {
+      throw new Error('Target assignment not found');
+    }
+
+    const bucketExpression =
+      granularity === 'week'
+        ? `date_trunc('week', snapshot_date)::date`
+        : granularity === 'month'
+          ? `date_trunc('month', snapshot_date)::date`
+          : `snapshot_date::date`;
+    const snapshotRows = await this.db.query(
+      `
+      with ranked as (
+        select
+          ${bucketExpression} as bucket_date,
+          snapshot_date,
+          actual_value,
+          target_value,
+          progress_pct,
+          status_label,
+          variance_value,
+          variance_pct,
+          row_number() over (
+            partition by ${bucketExpression}
+            order by snapshot_date desc, id desc
+          ) as row_rank
+        from target_progress_snapshots
+        where tenant_id = $1 and target_assignment_id = $2
+      )
+      select *
+      from ranked
+      where row_rank = 1
+      order by bucket_date asc
+      `,
+      [tenantId, targetAssignmentId]
+    );
+
+    const startDate = toDateOnly(assignment.period_start_date) || getCurrentISTDate();
+    const endDate = toDateOnly(assignment.period_end_date) || startDate;
+    const baseline = Number(assignment.baseline_value || 0);
+    const target = Number(assignment.target_value || 0);
+    const comparisonOperator = String(assignment.comparison_operator || 'GTE');
+    const lowerIsBetter = comparisonOperator === 'LTE';
+    const totalDays = Math.max(1, daysBetweenDates(startDate, endDate));
+    const latestSnapshot = snapshotRows[snapshotRows.length - 1] || null;
+    const latestSnapshotDate = toDateOnly(latestSnapshot?.snapshot_date);
+    const current = Number(latestSnapshot?.actual_value || 0);
+    const elapsedDays = latestSnapshotDate ? Math.max(0, Math.min(totalDays, daysBetweenDates(startDate, latestSnapshotDate))) : 0;
+    const remainingDays = Math.max(0, totalDays - elapsedDays);
+    const totalDelta = target - baseline;
+    const actualDelta = current - baseline;
+    const remainingDelta = target - current;
+    const requiredDailyRate = totalDelta / totalDays;
+    const actualDailyRate = elapsedDays > 0 ? actualDelta / elapsedDays : 0;
+    const requiredDailyRateFromNow = remainingDays > 0 ? remainingDelta / remainingDays : 0;
+    const projectedEnd = current + actualDailyRate * remainingDays;
+    const elapsedPct = (elapsedDays * 100) / totalDays;
+    const progressPercent = Number(latestSnapshot?.progress_pct || 0);
+    const paceRatio = elapsedPct > 0 ? progressPercent / elapsedPct : 0;
+
+    const requiredValueForDate = (date: string) => {
+      const elapsed = Math.max(0, Math.min(totalDays, daysBetweenDates(startDate, date)));
+      return baseline + requiredDailyRate * elapsed;
+    };
+
+    const series = snapshotRows
+      .map((row: any) => {
+        const date = toDateOnly(row.bucket_date);
+        if (!date) {
+          return null;
+        }
+        const actualValue = Number(row.actual_value || 0);
+        const requiredValue = requiredValueForDate(date);
+        const calculated = this.calculateTargetProgress(actualValue, baseline, target, comparisonOperator);
+        return {
+          date,
+          label: granularity === 'day' ? date : granularity === 'week' ? `Week of ${date}` : date.slice(0, 7),
+          snapshotDate: toDateOnly(row.snapshot_date) || date,
+          requiredValue,
+          actualValue,
+          targetValue: target,
+          progressPercent: Number(row.progress_pct ?? calculated.progressPct),
+          statusLabel: row.status_label || this.computeTargetStatus(calculated.progressPct),
+          varianceValue: Number(row.variance_value ?? calculated.varianceValue),
+          variancePct: Number(row.variance_pct ?? calculated.variancePct)
+        };
+      })
+      .filter(Boolean);
+
+    const milestones = [0.25, 0.5, 0.75, 1].map((ratio) => {
+      const value = baseline + totalDelta * ratio;
+      const targetDate = shiftDate(startDate, Math.round(totalDays * ratio));
+      const achievedPoint = series.find((point: any) => (lowerIsBetter ? Number(point.actualValue) <= value : Number(point.actualValue) >= value));
+      return {
+        label: `${Math.round(ratio * 100)}% milestone`,
+        value,
+        targetDate,
+        achieved: Boolean(achievedPoint),
+        achievedDate: achievedPoint?.snapshotDate || null
+      };
+    });
+
+    const aggregateEntityType = this.getAggregateEntityType(assignment.person_code) || 'person';
+    const scope = normalizeTargetScope(assignment.scope_level, assignment.scope_value);
+    const contributorFilters =
+      scope.scopeLevel === 'zone'
+        ? 'and zone = $5'
+        : scope.scopeLevel === 'region'
+          ? 'and region = $5'
+          : scope.scopeLevel === 'area'
+            ? 'and area = $5'
+            : '';
+    const contributorParams = contributorFilters
+      ? [tenantId, aggregateEntityType, assignment.metric_key, latestSnapshotDate, scope.scopeValue]
+      : [tenantId, aggregateEntityType, assignment.metric_key, latestSnapshotDate];
+    const contributorRows = latestSnapshotDate
+      ? await this.db.query(
+          `
+          select entity_id, entity_name, metric_value
+          from entity_metric_snapshots
+          where tenant_id = $1
+            and entity_type = $2
+            and metric_key = $3
+            and snapshot_date = $4::date
+            ${contributorFilters}
+          order by metric_value ${lowerIsBetter ? 'asc' : 'desc'}
+          limit 8
+          `,
+          contributorParams
+        )
+      : [];
+    const contributorTotal = contributorRows.reduce((sum: number, row: any) => sum + Math.abs(Number(row.metric_value || 0)), 0);
+    const contributors = contributorRows.map((row: any) => {
+      const value = Number(row.metric_value || 0);
+      return {
+        entityId: String(row.entity_id),
+        name: row.entity_name || row.entity_id,
+        value,
+        share: contributorTotal > 0 ? (Math.abs(value) * 100) / contributorTotal : 0
+      };
+    });
+
+    const assignmentEntityType = this.getAggregateEntityType(assignment.person_code) || 'salesman';
+    return {
+      assignment: {
+        id: Number(assignment.id),
+        name: assignment.assignment_name || `${normalizeTargetMetricKey(assignment.target_key)} goal`,
+        targetKey: assignment.target_key,
+        metricKey: normalizeTargetMetricKey(assignment.target_key),
+        dbMetricKey: assignment.metric_key,
+        metricLabel: assignment.metric_label || assignment.target_key,
+        metricUnit: assignment.metric_unit || null,
+        comparisonOperator,
+        assignmentEntityType,
+        assigneeLabel: assignment.full_name || null,
+        scopeLevel: assignment.scope_level || 'national',
+        scopeValue: assignment.scope_value || 'all_india',
+        startDate,
+        endDate,
+        status: assignment.status
+      },
+      progress: {
+        baseline,
+        current,
+        target,
+        progressPercent,
+        statusLabel: latestSnapshot?.status_label || this.computeTargetStatus(progressPercent),
+        varianceValue: Number(latestSnapshot?.variance_value || 0),
+        variancePct: Number(latestSnapshot?.variance_pct || 0),
+        elapsedPct,
+        totalDays,
+        elapsedDays,
+        remainingDays,
+        requiredDailyRate,
+        actualDailyRate,
+        requiredDailyRateFromNow,
+        projectedEnd,
+        paceRatio
+      },
+      series,
+      milestones,
+      contributors,
+      snapshots: series,
+      latestSnapshotDate,
+      granularity
     };
   }
 
@@ -7375,8 +7777,7 @@ export class SupeV1Service {
     return 'behind';
   }
 
-  private async recomputeTargetProgressInternal(runner: QueryRunner, tenantId: number): Promise<void> {
-    const today = getCurrentISTDate();
+  private async recomputeTargetProgressInternal(runner: QueryRunner, tenantId: number, snapshotDate = getCurrentISTDate()): Promise<void> {
     const assignments = await runner.query(
       `
       select ta.*, td.metric_key, td.comparison_operator, p.person_code
@@ -7402,7 +7803,7 @@ export class SupeV1Service {
 
       await runner.query(
         `delete from target_progress_snapshots where tenant_id = $1 and target_assignment_id = $2 and snapshot_date = $3::date`,
-        [tenantId, assignment.id, today]
+        [tenantId, assignment.id, snapshotDate]
       );
       await runner.query(
         `
@@ -7412,7 +7813,7 @@ export class SupeV1Service {
         )
         values ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11::jsonb)
         `,
-        [tenantId, assignment.id, assignment.person_id, today, actualValue, targetValue, progressPct, statusLabel, varianceValue, variancePct, JSON.stringify({})]
+        [tenantId, assignment.id, assignment.person_id, snapshotDate, actualValue, targetValue, progressPct, statusLabel, varianceValue, variancePct, JSON.stringify({})]
       );
     }
   }
@@ -7423,7 +7824,7 @@ export class SupeV1Service {
     await runner.connect();
     await runner.startTransaction();
     try {
-      await this.recomputeTargetProgressInternal(runner, tenantId);
+      await this.recomputeTargetProgressInternal(runner, tenantId, (await this.latestSnapshotDate(tenantId)) || getCurrentISTDate());
       await runner.commitTransaction();
     } catch (error) {
       await runner.rollbackTransaction();
@@ -7455,17 +7856,26 @@ export class SupeV1Service {
         ta.period_end_date,
         coalesce(tps.actual_value, 0) as actual_value,
         coalesce(tps.progress_pct, 0) as progress_pct,
-        tps.status_label
+        tps.status_label,
+        tps.snapshot_date,
+        coalesce(tps.variance_value, 0) as variance_value,
+        coalesce(tps.variance_pct, 0) as variance_pct,
+        coalesce(tpc.snapshot_count, 0) as snapshot_count
       from target_assignments ta
       join people p on p.id = ta.person_id
       join target_definitions td on td.id = ta.target_definition_id
       left join lateral (
-        select actual_value, progress_pct, status_label
+        select actual_value, progress_pct, status_label, snapshot_date, variance_value, variance_pct
         from target_progress_snapshots tps
         where tps.target_assignment_id = ta.id
         order by tps.snapshot_date desc
         limit 1
       ) tps on true
+      left join lateral (
+        select count(*)::int as snapshot_count
+        from target_progress_snapshots tps_count
+        where tps_count.target_assignment_id = ta.id
+      ) tpc on true
       where ta.tenant_id = $1
       order by ta.updated_at desc
       `,
@@ -7511,6 +7921,11 @@ export class SupeV1Service {
         targetValue: Number(row.target_value || 0),
         actualValue: Number(row.actual_value || 0),
         attainmentPct: Number(row.progress_pct || 0),
+        latestSnapshotDate: toDateOnly(row.snapshot_date),
+        snapshotCount: Number(row.snapshot_count || 0),
+        statusLabel: row.status_label || null,
+        varianceValue: Number(row.variance_value || 0),
+        variancePct: Number(row.variance_pct || 0),
         status: row.status === 'cancelled' ? 'paused' : row.status,
         notes: row.assignment_name || null
       }))
