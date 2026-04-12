@@ -7,7 +7,7 @@ import { ensureAskCatalogSchema, insertSemanticRecords, type TenantCatalogTarget
 
 type CliArgs = {
   tenantId: number;
-  sourcePath: string;
+  sourcePath?: string;
   refreshId: string;
 };
 
@@ -43,13 +43,9 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!tenantId || Number.isNaN(tenantId)) {
     throw new Error('Missing required --tenant-id <number>');
   }
-  if (!sourcePath) {
-    throw new Error('Missing required --file <path>');
-  }
-
   return {
     tenantId,
-    sourcePath,
+    sourcePath: sourcePath || undefined,
     refreshId: refreshId || randomUUID()
   };
 }

@@ -1,0 +1,3846 @@
+{
+  "version": "2026-02-25",
+  "source": "05_FMCG_MARKET_AND_QUESTION_TAXONOMY.md",
+  "clusterCount": 20,
+  "questionCount": 452,
+  "variantBlockCount": 47,
+  "variantCount": 248,
+  "clusters": [
+    {
+      "clusterNumber": 1,
+      "title": "Revenue & Billing Performance",
+      "questionCount": 32,
+      "questions": [
+        {
+          "questionNumber": 1,
+          "question": "What is my total secondary revenue MTD?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 2,
+          "question": "What is my revenue vs target as a percentage?",
+          "source": "SFA+TGT",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 3,
+          "question": "Am I ahead or behind pace for this month's revenue target?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 4,
+          "question": "What is my projected month-end revenue at current run rate?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 5,
+          "question": "How many days of billing are left and what's the required daily rate?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 6,
+          "question": "Which zone/region is contributing the most revenue?",
+          "source": "SFA+GEO",
+          "level": "L1",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 7,
+          "question": "Which zone/region is most behind its revenue target?",
+          "source": "SFA+TGT+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 8,
+          "question": "What is the revenue per outlet (billing depth) by zone?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 9,
+          "question": "What is the revenue per salesman by region?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 10,
+          "question": "How does this month's revenue compare to last month?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 11,
+          "question": "How does this month's revenue compare to same month last year?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 12,
+          "question": "What is the week-over-week revenue trend this month?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 13,
+          "question": "Which day of the week has the highest billing?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 14,
+          "question": "Is there a week-4 revenue spike (end-of-month loading)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 15,
+          "question": "What is the primary-to-secondary conversion ratio?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 16,
+          "question": "What is the per-bill value (average invoice amount)?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 17,
+          "question": "What is the average order value (AOV) by channel (GT vs MT)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 18,
+          "question": "How many zero-billing days have we had this month?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 19,
+          "question": "Which salesman has the highest revenue productivity (revenue per day worked)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 20,
+          "question": "Which salesman has the lowest revenue productivity?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 21,
+          "question": "What percentage of my total revenue comes from top 20% of retailers?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 22,
+          "question": "What is the revenue concentration risk — how much comes from top 3 distributors?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 23,
+          "question": "How does urban vs rural revenue split look?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 24,
+          "question": "What is the cash vs credit billing ratio?",
+          "source": "SFA+PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 25,
+          "question": "Which retailers have increased their order value vs last month?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 26,
+          "question": "Which retailers have decreased their order value vs last month?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 27,
+          "question": "What is the effective realization (revenue net of returns/damages)?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 28,
+          "question": "What is the revenue per SKU per outlet?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 29,
+          "question": "How much incremental revenue did the last scheme/offer generate?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 30,
+          "question": "What would revenue be if bottom 50% of salesmen matched the median?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 31,
+          "question": "What is the revenue gap between my best and worst region?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 32,
+          "question": "What is the month-on-month revenue CAGR by zone?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Geography"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 2,
+      "title": "Collection & Outstanding",
+      "questionCount": 28,
+      "questions": [
+        {
+          "questionNumber": 33,
+          "question": "What is my total outstanding right now?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 34,
+          "question": "What is my total collection MTD?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 35,
+          "question": "What is the collection-to-billing ratio (collection efficiency)?",
+          "source": "PAY+SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 36,
+          "question": "Which retailers have the highest outstanding?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 37,
+          "question": "How many retailers have outstanding > ₹25K?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 38,
+          "question": "How many retailers have outstanding > 30 days old?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 39,
+          "question": "What is the aging profile of outstanding (0-30, 30-60, 60-90, 90+ days)?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 40,
+          "question": "Is outstanding growing or shrinking month-over-month?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 41,
+          "question": "Which salesman has the highest outstanding in their territory?",
+          "source": "PAY+GEO",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 42,
+          "question": "Which zone has the worst collection efficiency?",
+          "source": "PAY+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 43,
+          "question": "Are high-outstanding retailers still ordering? (credit risk)",
+          "source": "PAY+SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 44,
+          "question": "How many retailers are at or above their credit limit?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 45,
+          "question": "What is the overdue amount (past payment terms)?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 46,
+          "question": "What is the cheque bounce rate by zone?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 47,
+          "question": "How much outstanding is concentrated in the top 5 retailers?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 48,
+          "question": "What is the payment mode split (cash/UPI/cheque/NEFT)?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 49,
+          "question": "Is there a shift toward digital payments?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 50,
+          "question": "Which retailers have never paid on time?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 51,
+          "question": "Which retailers have improved their payment behavior recently?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 52,
+          "question": "What is the outstanding as a percentage of monthly revenue? (DSO equivalent)",
+          "source": "PAY+SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 53,
+          "question": "If I collect all overdue amounts, how much working capital does that free?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 54,
+          "question": "Which distributor has the worst market outstanding?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 55,
+          "question": "What is the distributor-wise credit exposure?",
+          "source": "PAY+INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 56,
+          "question": "Are there seasonal patterns in collection (festive vs non-festive)?",
+          "source": "PAY",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 57,
+          "question": "How does my outstanding compare to industry benchmarks?",
+          "source": "PAY",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 58,
+          "question": "Which salesman is best at collections (highest collection ratio)?",
+          "source": "PAY+SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 59,
+          "question": "Can I predict which retailers will default based on payment patterns?",
+          "source": "PAY",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 60,
+          "question": "What is the net collectible outstanding (excluding disputed/returned)?",
+          "source": "PAY+INV",
+          "level": "L2",
+          "entity": "Retailer"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 3,
+      "title": "Coverage & Visit Execution",
+      "questionCount": 35,
+      "questions": [
+        {
+          "questionNumber": 61,
+          "question": "What is my overall outlet coverage percentage?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 62,
+          "question": "How many unique outlets were visited this month?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 63,
+          "question": "How many outlets are in my universe but were never visited?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 64,
+          "question": "What is the productive call percentage (visits that resulted in billing)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 65,
+          "question": "What is the average number of outlets visited per day per salesman?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 66,
+          "question": "Which salesman visits the fewest outlets per day?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 67,
+          "question": "How does stores-per-day correlate with revenue?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 68,
+          "question": "What is my beat adherence percentage (plan vs actual)?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 69,
+          "question": "Which beats have the worst adherence?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 70,
+          "question": "Does beat adherence drop in week 4 of the month?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 71,
+          "question": "Is the adherence drop correlated with target chasing?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 72,
+          "question": "How many outlets did we lose this month (active last month, not visited this month)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 73,
+          "question": "How many new outlets were added this month?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 74,
+          "question": "What is my net outlet addition rate?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 75,
+          "question": "Which salesmen are not completing their planned visits?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 76,
+          "question": "What is the average time spent per outlet?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 77,
+          "question": "Is time-per-outlet correlated with order value?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 78,
+          "question": "Which outlets have the highest visit frequency (over-serviced)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 79,
+          "question": "Which outlets have the lowest visit frequency (under-serviced)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 80,
+          "question": "What is the optimal visit frequency by retailer tier?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 81,
+          "question": "How many outlets should each salesman cover (ideal load)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 82,
+          "question": "If I increase coverage from 80% to 90%, what revenue uplift can I expect?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 83,
+          "question": "Which zones have coverage below the national average?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 84,
+          "question": "Is coverage declining in any specific geography?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 85,
+          "question": "How does GT coverage compare to MT coverage?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 86,
+          "question": "What is the ECO (effective coverage) — outlets billed vs total?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 87,
+          "question": "How does first-half-of-month coverage compare to second half?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 88,
+          "question": "Which routes/beats are the most efficient (highest revenue per visit)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 89,
+          "question": "Which routes/beats are the least efficient?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 90,
+          "question": "How does rural coverage compare to urban coverage?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 91,
+          "question": "What is the strike rate (orders per visit)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 92,
+          "question": "Are there ghost outlets (in universe but never ordered)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 93,
+          "question": "What is my total addressable outlet universe?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 94,
+          "question": "How does my universe compare to the Nielsen retail audit?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 95,
+          "question": "Which geographic pockets have zero representation?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 4,
+      "title": "Salesman Performance & Productivity",
+      "questionCount": 30,
+      "questions": [
+        {
+          "questionNumber": 96,
+          "question": "Who are my top 5 salesmen by revenue?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 97,
+          "question": "Who are my bottom 5 salesmen by revenue?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 98,
+          "question": "What is the revenue dispersion (range between best and worst)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 99,
+          "question": "Which salesmen show consistent month-on-month growth?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 100,
+          "question": "Which salesmen show declining performance?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 101,
+          "question": "Is there a correlation between experience/tenure and performance?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 102,
+          "question": "Which salesmen have the best lines-per-bill (SKU mix)?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 103,
+          "question": "Which salesmen sell only top 3 SKUs (narrow basket)?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 104,
+          "question": "Which salesmen have the best collection-to-billing ratio?",
+          "source": "SFA+PAY",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 105,
+          "question": "Are there salesmen with high revenue but poor collections?",
+          "source": "SFA+PAY",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 106,
+          "question": "Which salesmen have both low coverage AND low adherence (double signal)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 107,
+          "question": "How does salesman performance compare within the same zone?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 108,
+          "question": "What is the revenue per outlet per salesman (billing depth)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 109,
+          "question": "Which salesmen are over-relying on a few large retailers?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 110,
+          "question": "What is the ideal salesman territory size (outlets per salesman)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 111,
+          "question": "How many salesmen do I need to add to hit my coverage target?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 112,
+          "question": "What is the cost of adding one salesman vs the revenue uplift?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 113,
+          "question": "Which salesmen are likely to attrit (declining engagement signals)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 114,
+          "question": "How long does it take a new salesman to reach full productivity?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 115,
+          "question": "What is the learning curve by zone (onboarding speed)?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 116,
+          "question": "Which salesmen respond best to incentive schemes?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 117,
+          "question": "What is the absenteeism rate by salesman?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 118,
+          "question": "How do Monday and Saturday billing patterns differ by salesman?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 119,
+          "question": "Which salesmen have the highest return/damage rates in their territory?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 120,
+          "question": "Which salesmen bring in the most new retailers?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 121,
+          "question": "Which salesmen have never onboarded a new retailer?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 122,
+          "question": "What is the average order processing time by salesman?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 123,
+          "question": "Which salesmen have the highest order cancellation rate?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 124,
+          "question": "How does salesman age/experience affect new SKU adoption?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 125,
+          "question": "What is the correlation between salesman visits and retailer ordering behavior?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 5,
+      "title": "Retailer Behavior & Health",
+      "questionCount": 35,
+      "questions": [
+        {
+          "questionNumber": 126,
+          "question": "How many active retailers do I have (billed at least once this month)?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 127,
+          "question": "How many dormant retailers (not ordered in 30+ days)?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 128,
+          "question": "How many retailers are \"at risk\" (declining order frequency)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 129,
+          "question": "What is the retailer churn rate month-over-month?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 130,
+          "question": "What is the average order frequency (orders per month)?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 131,
+          "question": "Which retailers order most frequently?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 132,
+          "question": "Which retailers have the highest AOV?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 133,
+          "question": "Which retailers have the lowest AOV?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 134,
+          "question": "What is the retailer lifetime value (LTV) distribution?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 135,
+          "question": "Which retailers have potential to upgrade (high frequency, low basket)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 136,
+          "question": "Which retailers are declining (lower orders than 3 months ago)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 137,
+          "question": "Which retailers buy only 1-2 SKUs? (narrow basket)",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 138,
+          "question": "Which retailers buy 10+ SKUs? (wide basket, high value)",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 139,
+          "question": "What is the SKU penetration per retailer tier?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 140,
+          "question": "What is the retailer segmentation by value (A/B/C/D)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 141,
+          "question": "How many A-class retailers are in each zone?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 142,
+          "question": "What is the wallet share I have at each retailer vs competition?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 143,
+          "question": "Which retailers have switched to a competitor recently?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 144,
+          "question": "What is the retailer satisfaction proxy (complaint rate, return rate)?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 145,
+          "question": "Which retailers reorder within 7 days of delivery?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 146,
+          "question": "What is the repeat purchase rate by retailer type (kirana vs modern)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 147,
+          "question": "How does retailer ordering pattern change around festivals?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 148,
+          "question": "Which retailers should I target for upselling?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 149,
+          "question": "Which retailers should I target for cross-selling new categories?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 150,
+          "question": "What is the optimal credit limit for each retailer tier?",
+          "source": "PAY+SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 151,
+          "question": "Which retailers need a visit urgently (high value, overdue reorder)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 152,
+          "question": "How many retailers were onboarded but never reordered?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 153,
+          "question": "What is the new retailer conversion rate (onboarded → repeat buyer)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 154,
+          "question": "What is the optimal retailer density per beat?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 155,
+          "question": "Which retailers are most price-sensitive (only order during schemes)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 156,
+          "question": "What is the geographic distribution of my high-value retailers?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 157,
+          "question": "How many retailers am I losing per month and why?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 158,
+          "question": "What signals predict retailer churn?",
+          "source": "SFA+PAY",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 159,
+          "question": "Which retailers should be upgraded from GT to direct billing?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 160,
+          "question": "What is the average retailer age (time since first order) by region?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Retailer"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 6,
+      "title": "SKU & Product Performance",
+      "questionCount": 35,
+      "questions": [
+        {
+          "questionNumber": 161,
+          "question": "Which are my top 10 SKUs by revenue?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 162,
+          "question": "Which are my bottom 10 SKUs by revenue?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 163,
+          "question": "Which SKUs are growing vs declining this month?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 164,
+          "question": "What is the growth rate of each SKU vs last cycle?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 165,
+          "question": "What is the revenue contribution by category?",
+          "source": "SFA+CAT",
+          "level": "L1",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 166,
+          "question": "What is the SKU-wise margin contribution?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 167,
+          "question": "How many outlets are buying each SKU (outlet penetration)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 168,
+          "question": "What is the beat penetration for each SKU?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 169,
+          "question": "Which SKUs have high penetration but low velocity?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 170,
+          "question": "Which SKUs have low penetration but high velocity?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 171,
+          "question": "What is the average units per outlet per SKU?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 172,
+          "question": "What is the SKU mix (% of total revenue) by zone?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 173,
+          "question": "Are certain SKUs selling only in certain geographies?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 174,
+          "question": "Which SKUs have the widest geographic spread?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 175,
+          "question": "What is the attach rate (how often SKU A is bought with SKU B)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 176,
+          "question": "Which SKUs cannibalize each other?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 177,
+          "question": "What is the price realization per SKU (actual billing vs MRP)?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 178,
+          "question": "What is the SKU-level return/damage rate?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 179,
+          "question": "Which SKUs have the highest return rate?",
+          "source": "INV",
+          "level": "L1",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 180,
+          "question": "What is the shelf life remaining for slow-moving SKUs?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 181,
+          "question": "Which SKUs should I discontinue (declining, low penetration, high returns)?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 182,
+          "question": "What is the 80-20 of my SKU portfolio (how many SKUs drive 80% revenue)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 183,
+          "question": "How does SKU performance vary by retailer type (kirana vs modern)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 184,
+          "question": "Which pack size sells best in which geography?",
+          "source": "SFA+CAT+GEO",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 185,
+          "question": "What is the price-pack architecture performance (₹5 vs ₹10 vs ₹50 packs)?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 186,
+          "question": "How does seasonality affect each SKU category?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 187,
+          "question": "Which SKUs are fast-moving and need higher safety stock?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 188,
+          "question": "Which SKUs are frequently out of stock at distributor?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 189,
+          "question": "What is the optimal SKU assortment by outlet type?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 190,
+          "question": "If I push a new variant, which outlets should stock it first?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 191,
+          "question": "What is the Pareto of my product portfolio (revenue concentration)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 192,
+          "question": "How does the must-sell list compliance look?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 193,
+          "question": "Which salesmen are best at selling new/focus SKUs?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 194,
+          "question": "What is the revenue at risk if a top SKU declines 10%?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 195,
+          "question": "Which geography has the highest potential for SKU X based on demographics?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 7,
+      "title": "Distributor Performance & Health",
+      "questionCount": 25,
+      "questions": [
+        {
+          "questionNumber": 196,
+          "question": "What is each distributor's secondary revenue MTD?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 197,
+          "question": "What is the primary-to-secondary gap per distributor?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 198,
+          "question": "Which distributors are overstocked?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 199,
+          "question": "Which distributors are understocked (potential stock-outs)?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 200,
+          "question": "What is the days of inventory cover per distributor?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 201,
+          "question": "What is the damage/expiry rate per distributor?",
+          "source": "INV",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 202,
+          "question": "Which distributors have the highest damage percentage?",
+          "source": "INV",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 203,
+          "question": "What is the distributor ROI (margin earned vs investment)?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 204,
+          "question": "How many active salesmen does each distributor deploy?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 205,
+          "question": "What is the revenue per salesman per distributor?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 206,
+          "question": "How many active outlets does each distributor serve?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 207,
+          "question": "What is the outlet reach per distributor vs total addressable?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 208,
+          "question": "Which distributors are under-penetrated in their area?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 209,
+          "question": "Are there geographic overlaps between distributors?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 210,
+          "question": "Are there geographic gaps (areas with no distributor)?",
+          "source": "GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 211,
+          "question": "What is the distributor claim settlement time?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 212,
+          "question": "Which distributors have the highest outstanding receivable?",
+          "source": "PAY",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 213,
+          "question": "What is the distributor satisfaction score (claims, payments, delivery time)?",
+          "source": "INV+PAY",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 214,
+          "question": "Should I add a new distributor in geography X?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 215,
+          "question": "What is the ideal number of distributors per region?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 216,
+          "question": "Which distributor should I expand territory for?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 217,
+          "question": "How does distributor size correlate with performance?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 218,
+          "question": "What is the FIFO compliance per distributor (selling oldest stock first)?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 219,
+          "question": "What is the order fulfillment rate per distributor?",
+          "source": "INV+SFA",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 220,
+          "question": "How does delivery time impact retailer reorder rate?",
+          "source": "INV+SFA",
+          "level": "L3",
+          "entity": "Distributor"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 8,
+      "title": "Beat & Territory Management",
+      "questionCount": 22,
+      "questions": [
+        {
+          "questionNumber": 221,
+          "question": "What is the ECO (Effective Coverage per Outlet) for each beat?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 222,
+          "question": "What is the EBV (Expected Billing Value) vs realized value per beat?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 223,
+          "question": "Which beats have the worst realization percentage?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 224,
+          "question": "Which beats are over-served (too many visits, low ROI)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 225,
+          "question": "Which beats are under-served (high potential, low visits)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 226,
+          "question": "How should I redesign beats for optimal coverage?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 227,
+          "question": "What is the ideal number of outlets per beat?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 228,
+          "question": "How does beat size affect salesman productivity?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 229,
+          "question": "Should I split a large beat into two?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 230,
+          "question": "Should I merge two underperforming beats?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 231,
+          "question": "What is the average outstanding per beat?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 232,
+          "question": "Which beats have seasonal patterns (market day effects)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 233,
+          "question": "What is the route optimization opportunity (reduce travel time)?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 234,
+          "question": "How does beat sequence (which outlets visited first) affect daily revenue?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 235,
+          "question": "What is the revenue per sq km by beat (geographic density)?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 236,
+          "question": "Which beats have the highest new outlet onboarding potential?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 237,
+          "question": "How does weather/rainfall affect beat execution in rural areas?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 238,
+          "question": "What is the morning vs afternoon billing split per beat?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 239,
+          "question": "Are there beats where the salesman visits but never bills?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 240,
+          "question": "What is the inter-beat revenue variance (should resources shift)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 241,
+          "question": "How often do salesmen deviate from their assigned beat?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 242,
+          "question": "What is the impact of beat deviation on coverage and revenue?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 9,
+      "title": "Target Setting & Achievement",
+      "questionCount": 25,
+      "questions": [
+        {
+          "questionNumber": 243,
+          "question": "What percentage of salesmen are on track to hit target?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 244,
+          "question": "What percentage of regions are on track?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 245,
+          "question": "Which person on my team is furthest behind target?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 246,
+          "question": "Which person is furthest ahead?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 247,
+          "question": "What is the aggregate achievement rate (actual/target)?",
+          "source": "SFA+TGT",
+          "level": "L1",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 248,
+          "question": "How does this month's achievement rate compare to last month?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 249,
+          "question": "What is the target-achievement variance by zone?",
+          "source": "SFA+TGT+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 250,
+          "question": "Are my targets realistic (based on historical run rates)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 251,
+          "question": "Which targets should I revise mid-month?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 252,
+          "question": "How should I set next month's targets (based on trajectory)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 253,
+          "question": "What is the target allocation fairness (are some people over/under-targeted)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 254,
+          "question": "How does target pressure affect salesman behavior (loading, adherence drop)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 255,
+          "question": "Which metrics should I target beyond revenue (coverage, adherence, collection)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 256,
+          "question": "What is the cascading target waterfall (national → zone → region → area)?",
+          "source": "TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 257,
+          "question": "Is the target cascade balanced (do sub-targets add up to parent target)?",
+          "source": "TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 258,
+          "question": "Which incentive structure drives the best achievement rate?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 259,
+          "question": "How much incremental revenue does each ₹1 of incentive generate?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 260,
+          "question": "What is the target fatigue signal (consistent near-miss for 3+ months)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 261,
+          "question": "How does quarterly target setting compare to monthly?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 262,
+          "question": "What is the sandbagging risk (people who always hit exactly 100-102%)?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 263,
+          "question": "Which geography needs higher targets (over-achieving consistently)?",
+          "source": "SFA+TGT+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 264,
+          "question": "Which geography needs lower targets (consistently missing)?",
+          "source": "SFA+TGT+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 265,
+          "question": "What is the payout liability if everyone hits 100% target?",
+          "source": "TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 266,
+          "question": "How does target achievement vary by day of month (front-loaded vs back-loaded)?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 267,
+          "question": "What is the minimum target for a new salesman in their first 3 months?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Salesman"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 10,
+      "title": "Growth & Expansion",
+      "questionCount": 22,
+      "questions": [
+        {
+          "questionNumber": 268,
+          "question": "Where is my fastest-growing region?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 269,
+          "question": "Where is my slowest-growing region?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 270,
+          "question": "What is my growth rate vs last year same quarter?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 271,
+          "question": "What is driving my growth — depth (more per outlet) or breadth (more outlets)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 272,
+          "question": "What is the growth contribution of new outlets vs existing?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 273,
+          "question": "What is the growth contribution of new SKUs vs existing?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 274,
+          "question": "Which geography has the highest untapped potential?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 275,
+          "question": "If I expand to geography X, what revenue can I expect?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 276,
+          "question": "What is the cost of entering a new geography (distributor appointment + salesman hire)?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 277,
+          "question": "How many months does a new geography take to break even?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 278,
+          "question": "Which channel should I grow in — GT, MT, or e-commerce?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 279,
+          "question": "What is my GT vs MT revenue split?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 280,
+          "question": "Is MT growing faster than GT?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 281,
+          "question": "What is the incremental revenue from rural expansion?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 282,
+          "question": "How does premiumization affect my revenue mix?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 283,
+          "question": "Which price point has the highest growth?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 284,
+          "question": "What is my market share in each region (if data available)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 285,
+          "question": "Where are my competitors stronger than me?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 286,
+          "question": "What is the whitespace in my distribution (areas with consumers but no coverage)?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 287,
+          "question": "How does population density correlate with revenue density?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 288,
+          "question": "What is the revenue per capita in each region I serve?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 289,
+          "question": "Should I deepen in existing markets or expand to new ones?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 11,
+      "title": "New Launch Performance",
+      "questionCount": 20,
+      "questions": [
+        {
+          "questionNumber": 290,
+          "question": "How many outlets have we placed the new SKU in?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 291,
+          "question": "What is the new SKU's penetration vs plan?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 292,
+          "question": "What is the repeat purchase rate for the new SKU?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 293,
+          "question": "Which zone adopted the new SKU fastest?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 294,
+          "question": "Which zone is lagging on new SKU adoption?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 295,
+          "question": "Is the new SKU cannibalizing an existing SKU?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 296,
+          "question": "What is the new SKU's revenue trajectory (week 1, 2, 3, 4)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 297,
+          "question": "Which salesmen are pushing the new SKU and which aren't?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 298,
+          "question": "What is the must-stock compliance for the new SKU?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 299,
+          "question": "Are there distributor stock-outs of the new SKU?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 300,
+          "question": "What is the trial-to-repeat ratio for the new SKU?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 301,
+          "question": "How does the new SKU perform in urban vs rural?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 302,
+          "question": "Is the new SKU hitting its price realization target?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 303,
+          "question": "Should we accelerate the new SKU rollout to more geographies?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 304,
+          "question": "Should we pause the new SKU in underperforming markets?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 305,
+          "question": "What is the return rate for the new SKU (quality signal)?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 306,
+          "question": "How does the new SKU's velocity compare to its category peers?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 307,
+          "question": "Which pack size of the new SKU is performing best?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 308,
+          "question": "What is the optimal launch sequence for the next new SKU based on learnings?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 309,
+          "question": "What percentage of my salesmen have been trained on the new SKU?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 12,
+      "title": "Scheme & Promotion Effectiveness",
+      "questionCount": 20,
+      "questions": [
+        {
+          "questionNumber": 310,
+          "question": "How many retailers participated in the current scheme?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 311,
+          "question": "What is the participation rate vs eligible pool?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 312,
+          "question": "What incremental revenue did the scheme generate?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 313,
+          "question": "What is the scheme ROI (incremental revenue / scheme cost)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 314,
+          "question": "Did the scheme attract new buyers or just increase existing buyer volume?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 315,
+          "question": "Which scheme type works best (trade discount, buy X get Y, slab incentive)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 316,
+          "question": "Which geography responded best to the scheme?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 317,
+          "question": "Is there a post-scheme drop-off (retailers stock-piled and stopped ordering)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 318,
+          "question": "How does scheme timing affect participation (beginning vs end of month)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 319,
+          "question": "What is the scheme pass-through rate (is the retailer passing the benefit to consumers)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 320,
+          "question": "Are there retailers who only order during schemes? (deal-seekers)",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 321,
+          "question": "What is the optimal scheme duration?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 322,
+          "question": "How does competitive scheme activity affect my performance?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 323,
+          "question": "Are there scheme overlaps (multiple schemes on same SKU at same time)?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 324,
+          "question": "What is the budget utilization of the current scheme?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 325,
+          "question": "Which salesman is best at driving scheme participation?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 326,
+          "question": "How does scheme communication channel (WhatsApp, salesman, poster) affect participation?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 327,
+          "question": "Should I extend the current scheme or close it?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 328,
+          "question": "What should the next scheme focus on (SKU push, AOV uplift, reactivation)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 329,
+          "question": "How does my scheme spend compare to industry norms?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 13,
+      "title": "Inventory & Supply Chain",
+      "questionCount": 20,
+      "questions": [
+        {
+          "questionNumber": 330,
+          "question": "What is the total inventory at distributor level?",
+          "source": "INV",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 331,
+          "question": "What is the days of stock cover per SKU per distributor?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 332,
+          "question": "Which SKUs are at risk of stock-out in the next 7 days?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 333,
+          "question": "Which distributors are overstocked on slow-moving SKUs?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 334,
+          "question": "What is the fill rate (% of orders fully fulfilled)?",
+          "source": "INV+SFA",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 335,
+          "question": "What is the order-to-delivery lead time?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 336,
+          "question": "How much revenue is lost due to stock-outs?",
+          "source": "INV+SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 337,
+          "question": "What is the damage rate by warehouse/distributor?",
+          "source": "INV",
+          "level": "L1",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 338,
+          "question": "What is the expiry rate by SKU category?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 339,
+          "question": "How much value is lost to damages and expiry?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 340,
+          "question": "What is the return rate and top return reasons?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 341,
+          "question": "How does FIFO compliance affect expiry rates?",
+          "source": "INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 342,
+          "question": "What is the optimal reorder point for each SKU at each distributor?",
+          "source": "INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 343,
+          "question": "What is the demand forecast for next month by SKU?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 344,
+          "question": "Are there seasonal demand patterns I should stock for?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 345,
+          "question": "What is the cost of carrying excess inventory?",
+          "source": "INV",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 346,
+          "question": "How does dispatch timing affect distributor stock levels?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 347,
+          "question": "Are there logistics bottlenecks in any geography?",
+          "source": "INV+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 348,
+          "question": "What is the ideal SKU assortment per distributor (vs what they carry)?",
+          "source": "INV+CAT",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 349,
+          "question": "How much dead stock is in the system?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 14,
+      "title": "Competitive Intelligence",
+      "questionCount": 15,
+      "questions": [
+        {
+          "questionNumber": 350,
+          "question": "Which retailers have started stocking a competitor's product?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 351,
+          "question": "Is there a geography where a competitor is gaining share?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 352,
+          "question": "Which of my SKUs face the most competitive pressure?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 353,
+          "question": "How does my pricing compare to competition at retail?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 354,
+          "question": "Are there retailers who stopped ordering because of a competitor's scheme?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 355,
+          "question": "What is the competitive share of shelf at key outlets?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 356,
+          "question": "How does my salesman's visit frequency compare to competitor's?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 357,
+          "question": "Which geographies am I losing to a specific competitor?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 358,
+          "question": "What is my counter-strategy for competitive launches?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 359,
+          "question": "How quickly do I respond to competitor pricing moves?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 360,
+          "question": "Where is my product not available but the competitor is? (distribution gap)",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 361,
+          "question": "Which retailer segments are most vulnerable to competitive switching?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 362,
+          "question": "What is the price elasticity of my key SKUs vs competition?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 363,
+          "question": "Am I losing on-shelf visibility to competitors?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 364,
+          "question": "How does my secondary scheme compare to competitor schemes?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 15,
+      "title": "Seasonal & Temporal Patterns",
+      "questionCount": 15,
+      "questions": [
+        {
+          "questionNumber": 365,
+          "question": "How does festive season affect my revenue (Diwali, Navratri, Christmas)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 366,
+          "question": "What is the pre-festival loading pattern?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 367,
+          "question": "Is there a summer vs winter SKU demand shift?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 368,
+          "question": "How does monsoon affect rural beat execution?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 369,
+          "question": "What is the wedding season revenue uplift?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 370,
+          "question": "How does back-to-school affect stationery/food categories?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 371,
+          "question": "Is there a payday cycle effect on retail ordering (1st/15th of month)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 372,
+          "question": "What is the year-end channel loading pattern?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 373,
+          "question": "How does quarter-end target pressure affect billing patterns?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 374,
+          "question": "What is the optimal time to launch a new SKU (month/quarter)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 375,
+          "question": "How does harvest season affect staple purchases in rural areas?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 376,
+          "question": "What is the Ramadan/Eid effect on certain categories?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 377,
+          "question": "How does IPL season affect beverage and snack sales?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 378,
+          "question": "Is there a vacation season slump (May-June)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 379,
+          "question": "What is the Republic Day / Independence Day promotional lift?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 16,
+      "title": "Operational Efficiency",
+      "questionCount": 15,
+      "questions": [
+        {
+          "questionNumber": 380,
+          "question": "What is my cost-to-serve per outlet?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 381,
+          "question": "What is my cost per order (salesman cost / orders)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 382,
+          "question": "How does distributor margin affect their motivation and performance?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 383,
+          "question": "What is the optimal salesman-to-outlet ratio?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 384,
+          "question": "Is my field force the right size for my distribution ambition?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 385,
+          "question": "What is the vehicle/logistics cost per order?",
+          "source": "INV",
+          "level": "L2",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 386,
+          "question": "How much time does order processing take (order to dispatch to delivery)?",
+          "source": "INV+SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 387,
+          "question": "What is the billing accuracy (orders billed correctly vs total orders)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 388,
+          "question": "How much time do salesmen spend on non-selling activities?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 389,
+          "question": "What is the technology adoption rate of my SFA/app?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 390,
+          "question": "How does app adoption affect productivity?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 391,
+          "question": "What percentage of orders are placed through the app vs manual?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 392,
+          "question": "What is the sync failure rate (offline orders not uploaded)?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 393,
+          "question": "How does distributor billing software integration affect order accuracy?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 394,
+          "question": "What is the ROI of my SFA investment?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 17,
+      "title": "Strategic & What-If Questions",
+      "questionCount": 10,
+      "questions": [
+        {
+          "questionNumber": 395,
+          "question": "What if I hire 10 more salesmen — what revenue uplift should I expect?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 396,
+          "question": "What if I raise prices by 5% — what volume loss should I expect?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 397,
+          "question": "What if I increase distributor margin by 1% — does it improve fill rates?",
+          "source": "INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 398,
+          "question": "What if I shift 20% of budget from scheme to salesman incentives?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 399,
+          "question": "What if I close my worst-performing distributor — which salesmen and retailers are affected?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 400,
+          "question": "What if I merge two regions — does it improve or hurt coverage?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 401,
+          "question": "What if coverage improves by 10pp — how much revenue does that add?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 402,
+          "question": "What if beat adherence reaches 95% — how much realization gap closes?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Beat"
+        },
+        {
+          "questionNumber": 403,
+          "question": "What if I launch in 3 new states — what infrastructure do I need?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 404,
+          "question": "What if a key distributor leaves — what is the contingency plan?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Distributor"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 18,
+      "title": "Cross-Entity & System-Level Questions",
+      "questionCount": 8,
+      "questions": [
+        {
+          "questionNumber": 405,
+          "question": "What is the overall health score of my distribution network?",
+          "source": "SFA+PAY+INV",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 406,
+          "question": "Which single lever would have the most impact on my revenue?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 407,
+          "question": "If I could fix one thing this month, what should it be?",
+          "source": "SFA+PAY",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 408,
+          "question": "What are the top 3 risks to my quarterly number?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 409,
+          "question": "How does my execution quality compare across zones?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 410,
+          "question": "What is the correlation between coverage, adherence, and revenue?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 411,
+          "question": "Which combination of improvements (coverage + collection + SKU mix) maximizes revenue per unit effort?",
+          "source": "SFA+PAY+CAT",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 412,
+          "question": "If I were starting from scratch, which 5 markets would I enter first based on data?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 19,
+      "title": "People, Org Health & Team Structure",
+      "questionCount": 22,
+      "questions": [
+        {
+          "questionNumber": 413,
+          "question": "What is my salesman attrition rate by zone?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 414,
+          "question": "Which zones have the highest salesman turnover?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 415,
+          "question": "What is the average tenure of my salesforce?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 416,
+          "question": "Is there a correlation between salesman attrition and manager quality?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 417,
+          "question": "What is the ramp-up time for a new hire (months to reach median productivity)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 418,
+          "question": "How does ramp-up time vary by zone (urban vs rural, mentorship quality)?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 419,
+          "question": "What is the cost of replacing one salesman (recruitment + training + lost productivity)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 420,
+          "question": "Which ASMs have the best-performing teams consistently?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 421,
+          "question": "Which ASMs have the worst team performance — is it their people or their territory?",
+          "source": "SFA+TGT+GEO",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 422,
+          "question": "What is the span of control per ASM (salesmen managed)? Is it optimal?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 423,
+          "question": "Does smaller span of control (fewer salesmen per ASM) correlate with better performance?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 424,
+          "question": "How many salesmen are working on a given day vs total headcount? (attendance rate)",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 425,
+          "question": "Is there a day-of-week pattern to absenteeism? (Monday/Saturday effect)",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 426,
+          "question": "What is the training completion rate for new product/process training?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 427,
+          "question": "Does training completion correlate with new SKU adoption and revenue?",
+          "source": "SFA+CAT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 428,
+          "question": "What is the incentive payout as a percentage of revenue generated?",
+          "source": "SFA+TGT",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 429,
+          "question": "Which incentive structure (slab vs linear vs kicker) drives the best behavior?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 430,
+          "question": "Are there salesmen gaming the system (splitting orders, front-loading)?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 431,
+          "question": "What is the gender diversity of my salesforce and does it affect coverage in certain areas?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 432,
+          "question": "How does language/local-origin of salesman affect performance in a region?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 433,
+          "question": "What is the right org structure — fewer strong distributors or more smaller ones?",
+          "source": "SFA+INV",
+          "level": "L3",
+          "entity": "Distributor"
+        },
+        {
+          "questionNumber": 434,
+          "question": "If I promote an ASM to RSM, who should replace them and what's the expected performance dip?",
+          "source": "SFA+TGT",
+          "level": "L3",
+          "entity": "All"
+        }
+      ]
+    },
+    {
+      "clusterNumber": 20,
+      "title": "Channel-Specific Questions — GT vs MT vs E-commerce",
+      "questionCount": 18,
+      "questions": [
+        {
+          "questionNumber": 435,
+          "question": "What is my revenue split between General Trade (GT) and Modern Trade (MT)?",
+          "source": "SFA",
+          "level": "L1",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 436,
+          "question": "Is MT growing faster than GT in my portfolio?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 437,
+          "question": "What is my GT-to-MT ratio compared to the category average?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 438,
+          "question": "Which SKUs over-index in MT vs GT? (premium vs mass)",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "SKU"
+        },
+        {
+          "questionNumber": 439,
+          "question": "What is my shelf space/SOB (share of business) in key MT chains?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 440,
+          "question": "How does my AOV differ between GT and MT?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 441,
+          "question": "What is the payment terms difference between GT and MT, and how does it affect cash flow?",
+          "source": "PAY",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 442,
+          "question": "Which MT chains are most profitable after accounting for listing fees and margins?",
+          "source": "SFA+PAY",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 443,
+          "question": "Am I losing GT share to MT/e-commerce in any geography?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 444,
+          "question": "What is the GT outlet density vs MT store density by city tier?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 445,
+          "question": "How does my rural GT performance compare to urban GT?",
+          "source": "SFA+GEO",
+          "level": "L2",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 446,
+          "question": "Which modern trade chains should I enter next based on geographic overlap with my distribution?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 447,
+          "question": "What is the cost-to-serve difference between GT and MT?",
+          "source": "SFA",
+          "level": "L3",
+          "entity": "All"
+        },
+        {
+          "questionNumber": 448,
+          "question": "Are my GT salesmen pushing my full portfolio or only top sellers?",
+          "source": "SFA+CAT",
+          "level": "L2",
+          "entity": "Salesman"
+        },
+        {
+          "questionNumber": 449,
+          "question": "How does e-commerce cannibalize my GT revenue in urban markets?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 450,
+          "question": "What is the optimal channel strategy by city tier (Tier 1 vs Tier 2 vs Tier 3+)?",
+          "source": "SFA+GEO",
+          "level": "L3",
+          "entity": "Geography"
+        },
+        {
+          "questionNumber": 451,
+          "question": "How does wholesale/semi-wholesale channel performance compare to retail?",
+          "source": "SFA",
+          "level": "L2",
+          "entity": "Retailer"
+        },
+        {
+          "questionNumber": 452,
+          "question": "Which channel has the highest return rate and why?",
+          "source": "SFA+INV",
+          "level": "L2",
+          "entity": "All"
+        }
+      ]
+    }
+  ],
+  "variantLibrary": [
+    {
+      "questionNumber": 1,
+      "canonicalQuestion": "What is my total secondary revenue MTD?",
+      "variants": [
+        "What's my revenue?",
+        "Total billing this month",
+        "How much have we done?",
+        "Secondary MTD",
+        "Kitna hua hai is month?\"",
+        "Revenue update",
+        "Show me billing numbers"
+      ]
+    },
+    {
+      "questionNumber": 3,
+      "canonicalQuestion": "Am I ahead or behind pace for this month's revenue target?",
+      "variants": [
+        "Are we on track?",
+        "Will we hit target?",
+        "Am I ahead or behind?",
+        "Run rate kya hai?",
+        "Pace check",
+        "Target ke hisab se kahan hain?",
+        "How's the month looking?",
+        "Revenue pace"
+      ]
+    },
+    {
+      "questionNumber": 4,
+      "canonicalQuestion": "What is my projected month-end revenue at current run rate?",
+      "variants": [
+        "Where will we land?",
+        "Month-end projection",
+        "Projected revenue?",
+        "If we keep going like this, how much?",
+        "Run rate se kahan pahunchenge?",
+        "Forecast",
+        "What's the projected close?"
+      ]
+    },
+    {
+      "questionNumber": 14,
+      "canonicalQuestion": "Is there a week-4 revenue spike (end-of-month loading)?",
+      "variants": [
+        "Are we loading at month end?",
+        "Is there end-of-month dumping?",
+        "Week 4 spike?",
+        "Month end loading pattern",
+        "Kya last week mein sab push ho raha hai?"
+      ]
+    },
+    {
+      "questionNumber": 30,
+      "canonicalQuestion": "What would revenue be if bottom 50% of salesmen matched the median?",
+      "variants": [
+        "If the bottom half matched the middle, how much more?",
+        "What's the uplift if weak salesmen improve?",
+        "Revenue uplift from bottom 50%",
+        "If everyone performed average, what's the number?",
+        "Potential if poor performers improve"
+      ]
+    },
+    {
+      "questionNumber": 33,
+      "canonicalQuestion": "What is my total outstanding right now?",
+      "variants": [
+        "Outstanding kitna hai?",
+        "Total outstanding",
+        "How much is pending?",
+        "Collection pending amount",
+        "What's stuck?",
+        "Retailer outstanding"
+      ]
+    },
+    {
+      "questionNumber": 39,
+      "canonicalQuestion": "What is the aging profile of outstanding (0-30, 30-60, 60-90, 90+ days)?",
+      "variants": [
+        "Outstanding aging",
+        "How old is the outstanding?",
+        "Break up by age — outstanding",
+        "30-60-90 day breakup",
+        "Outstanding bucket wise",
+        "Aging report"
+      ]
+    },
+    {
+      "questionNumber": 43,
+      "canonicalQuestion": "Are high-outstanding retailers still ordering? (credit risk)",
+      "variants": [
+        "Who owes money but still orders?",
+        "Credit risk retailers",
+        "Outstanding waale abhi bhi order kar rahe hain?",
+        "Are defaulters still buying?",
+        "High risk ordering accounts"
+      ]
+    },
+    {
+      "questionNumber": 59,
+      "canonicalQuestion": "Can I predict which retailers will default based on payment patterns?",
+      "variants": [
+        "Who will default next?",
+        "Prediction on bad debt",
+        "Which retailers will become NPA?",
+        "Default risk prediction",
+        "Kaunsa retailer payment nahi karega?"
+      ]
+    },
+    {
+      "questionNumber": 61,
+      "canonicalQuestion": "What is my overall outlet coverage percentage?",
+      "variants": [
+        "Coverage kya hai?",
+        "How many shops covered?",
+        "Outlet coverage",
+        "How much of universe visited?",
+        "Coverage percentage"
+      ]
+    },
+    {
+      "questionNumber": 64,
+      "canonicalQuestion": "What is the productive call percentage (visits that resulted in billing)?",
+      "variants": [
+        "Productive calls",
+        "How many visits converted to orders?",
+        "Strike rate",
+        "Billing per visit",
+        "PC percentage",
+        "Kitne visit mein order hua?"
+      ]
+    },
+    {
+      "questionNumber": 82,
+      "canonicalQuestion": "If I increase coverage from 80% to 90%, what revenue uplift can I expect?",
+      "variants": [
+        "What's the revenue impact of 10% more coverage?",
+        "If we cover 10% more outlets, how much more revenue?",
+        "Coverage to revenue math",
+        "80 se 90 coverage karein toh kitna revenue badhega?",
+        "ROI of improving coverage"
+      ]
+    },
+    {
+      "questionNumber": 96,
+      "canonicalQuestion": "Who are my top 5 salesmen by revenue?",
+      "variants": [
+        "Top 5 salesmen",
+        "Best performers",
+        "Sabse zyada kaun kar raha hai?",
+        "Who's killing it?",
+        "Top guys",
+        "Best salesmen this month"
+      ]
+    },
+    {
+      "questionNumber": 106,
+      "canonicalQuestion": "Which salesmen have both low coverage AND low adherence (double signal)?",
+      "variants": [
+        "Who has both coverage and adherence problems?",
+        "Double trouble salesmen",
+        "Dono mein kharab kaun hai?",
+        "Coverage + adherence both low — who?",
+        "Red flag salesmen"
+      ]
+    },
+    {
+      "questionNumber": 113,
+      "canonicalQuestion": "Which salesmen are likely to attrit (declining engagement signals)?",
+      "variants": [
+        "Who's about to quit?",
+        "Attrition risk",
+        "Kaun chhod sakta hai?",
+        "Early warning on salesman leaving",
+        "Declining engagement — salesman"
+      ]
+    },
+    {
+      "questionNumber": 127,
+      "canonicalQuestion": "How many dormant retailers (not ordered in 30+ days)?",
+      "variants": [
+        "Dormant retailers",
+        "Kitne shops ne order nahi diya?",
+        "Inactive retailers",
+        "How many shops sleeping?",
+        "30-day no-order list"
+      ]
+    },
+    {
+      "questionNumber": 135,
+      "canonicalQuestion": "Which retailers have potential to upgrade (high frequency, low basket)?",
+      "variants": [
+        "Who can buy more?",
+        "Upsell targets",
+        "High frequency low basket",
+        "Upgrade potential retailers",
+        "Kaun zyada kharid sakta hai?",
+        "Frequent but small buyers"
+      ]
+    },
+    {
+      "questionNumber": 158,
+      "canonicalQuestion": "What signals predict retailer churn?",
+      "variants": [
+        "How to predict churn?",
+        "What causes retailer loss?",
+        "Churn signals",
+        "Retailer kyu chhod raha hai?",
+        "Early warning for retailer leaving"
+      ]
+    },
+    {
+      "questionNumber": 163,
+      "canonicalQuestion": "Which SKUs are growing vs declining this month?",
+      "variants": [
+        "Growing and declining SKUs",
+        "Which products going up, which going down?",
+        "SKU growth status",
+        "Kaunsa product badh raha hai?",
+        "Product performance trend"
+      ]
+    },
+    {
+      "questionNumber": 170,
+      "canonicalQuestion": "Which SKUs have low penetration but high velocity?",
+      "variants": [
+        "Products selling fast but in few outlets",
+        "Low penetration high velocity",
+        "Hidden gems",
+        "Which SKUs need more distribution?",
+        "Kam outlets mein zyada bik raha hai"
+      ]
+    },
+    {
+      "questionNumber": 181,
+      "canonicalQuestion": "Which SKUs should I discontinue (declining, low penetration, high returns)?",
+      "variants": [
+        "What should I kill?",
+        "Delist candidates",
+        "Which products should go?",
+        "Dead SKUs",
+        "Kaunsa product band karein?"
+      ]
+    },
+    {
+      "questionNumber": 198,
+      "canonicalQuestion": "Which distributors are overstocked?",
+      "variants": [
+        "Who has too much stock?",
+        "Overstocked distributors",
+        "Kiske paas zyada maal pada hai?",
+        "Excess inventory — distributor wise",
+        "Stock piling up where?"
+      ]
+    },
+    {
+      "questionNumber": 214,
+      "canonicalQuestion": "Should I add a new distributor in geography X?",
+      "variants": [
+        "Do I need another distributor in [area]?",
+        "New distributor — [city]?",
+        "Should I appoint in [region]?",
+        "[Region] mein naya distributor lagana chahiye?",
+        "Expansion — distributor for [area]"
+      ]
+    },
+    {
+      "questionNumber": 222,
+      "canonicalQuestion": "What is the EBV vs realized value per beat?",
+      "variants": [
+        "Beat realization",
+        "EBV vs actual",
+        "How much of expected is actually billed?",
+        "Beat ka potential vs actual",
+        "Realization percentage"
+      ]
+    },
+    {
+      "questionNumber": 226,
+      "canonicalQuestion": "How should I redesign beats for optimal coverage?",
+      "variants": [
+        "Beat redesign",
+        "How to restructure routes?",
+        "Beat optimization",
+        "Routes rearrange kaise karein?",
+        "Best beat design"
+      ]
+    },
+    {
+      "questionNumber": 243,
+      "canonicalQuestion": "What percentage of salesmen are on track to hit target?",
+      "variants": [
+        "How many will hit target?",
+        "Target achievement status",
+        "Kitne log target pe hain?",
+        "On track percentage",
+        "Who'll make it?"
+      ]
+    },
+    {
+      "questionNumber": 250,
+      "canonicalQuestion": "Are my targets realistic (based on historical run rates)?",
+      "variants": [
+        "Am I setting fair targets?",
+        "Are targets achievable?",
+        "Target realistic hai ya nahi?",
+        "Target vs history check",
+        "Sanity check on targets"
+      ]
+    },
+    {
+      "questionNumber": 262,
+      "canonicalQuestion": "What is the sandbagging risk (people who always hit exactly 100-102%)?",
+      "variants": [
+        "Who's sandbagging?",
+        "Suspiciously perfect achievement",
+        "Always 100% — is anyone gaming?",
+        "Kaun target manage kar raha hai?",
+        "Target gaming detection"
+      ]
+    },
+    {
+      "questionNumber": 271,
+      "canonicalQuestion": "What is driving my growth — depth (more per outlet) or breadth (more outlets)?",
+      "variants": [
+        "Is growth from depth or breadth?",
+        "More outlets or more per outlet?",
+        "Growth driver — depth ya breadth?",
+        "What's pushing the number?",
+        "Volume vs distribution growth"
+      ]
+    },
+    {
+      "questionNumber": 274,
+      "canonicalQuestion": "Which geography has the highest untapped potential?",
+      "variants": [
+        "Where's the whitespace?",
+        "Biggest opportunity geography",
+        "Kahan potential hai?",
+        "Untapped markets",
+        "Where should I expand?"
+      ]
+    },
+    {
+      "questionNumber": 292,
+      "canonicalQuestion": "What is the repeat purchase rate for the new SKU?",
+      "variants": [
+        "Is the new product getting reorders?",
+        "New SKU repeat rate",
+        "Are people reordering the new one?",
+        "Naya product dobara bik raha hai?",
+        "Trial to repeat — new SKU"
+      ]
+    },
+    {
+      "questionNumber": 295,
+      "canonicalQuestion": "Is the new SKU cannibalizing an existing SKU?",
+      "variants": [
+        "Is the new one eating the old one?",
+        "Cannibalization check",
+        "Naya product purane ko kha raha hai?",
+        "Are we just shifting volume?",
+        "New vs old — net incremental?"
+      ]
+    },
+    {
+      "questionNumber": 313,
+      "canonicalQuestion": "What is the scheme ROI (incremental revenue / scheme cost)?",
+      "variants": [
+        "Is the scheme working?",
+        "Scheme ROI",
+        "Paisa wasool hua scheme se?",
+        "Return on scheme spend",
+        "Was the scheme worth it?"
+      ]
+    },
+    {
+      "questionNumber": 317,
+      "canonicalQuestion": "Is there a post-scheme drop-off (retailers stock-piled and stopped ordering)?",
+      "variants": [
+        "Did they just load up during scheme?",
+        "Post-scheme hangover",
+        "Scheme ke baad order ruk gaye?",
+        "Stock piling during scheme?",
+        "Is the scheme creating a dip after?"
+      ]
+    },
+    {
+      "questionNumber": 336,
+      "canonicalQuestion": "How much revenue is lost due to stock-outs?",
+      "variants": [
+        "Lost sales from stock-outs",
+        "Revenue loss — no stock",
+        "Stock out impact",
+        "Stock nahi tha toh kitna loss hua?",
+        "Missed revenue from availability gaps"
+      ]
+    },
+    {
+      "questionNumber": 343,
+      "canonicalQuestion": "What is the demand forecast for next month by SKU?",
+      "variants": [
+        "Next month forecast",
+        "What should I produce/order next month?",
+        "Demand prediction",
+        "Agley mahine kitna chahiye?",
+        "SKU-wise forecast"
+      ]
+    },
+    {
+      "questionNumber": 350,
+      "canonicalQuestion": "Which retailers have started stocking a competitor's product?",
+      "variants": [
+        "Who's stocking competition?",
+        "Competitor entry — which shops?",
+        "Kiske yahan competitor aa gaya?",
+        "New competitive presence",
+        "Where is [competitor brand] showing up?"
+      ]
+    },
+    {
+      "questionNumber": 365,
+      "canonicalQuestion": "How does festive season affect my revenue (Diwali, Navratri, Christmas)?",
+      "variants": [
+        "Festival impact on revenue",
+        "Diwali sales estimate",
+        "Festival effect",
+        "Tyohaar mein kitna zyada hota hai?",
+        "Festive spike analysis"
+      ]
+    },
+    {
+      "questionNumber": 380,
+      "canonicalQuestion": "What is my cost-to-serve per outlet?",
+      "variants": [
+        "Cost per outlet",
+        "How much does it cost to serve one shop?",
+        "Ek shop ki cost kitni hai?",
+        "Cost to serve",
+        "Outlet-level economics"
+      ]
+    },
+    {
+      "questionNumber": 395,
+      "canonicalQuestion": "What if I hire 10 more salesmen — what revenue uplift should I expect?",
+      "variants": [
+        "What if I add 10 salesmen?",
+        "10 naye aadmi lagaun toh?",
+        "Revenue from adding salesforce",
+        "Hiring impact",
+        "ROI of 10 new hires",
+        "If I expand the team by 10, what happens?"
+      ]
+    },
+    {
+      "questionNumber": 401,
+      "canonicalQuestion": "What if coverage improves by 10pp — how much revenue does that add?",
+      "variants": [
+        "Coverage 10 point improve karein toh?",
+        "Revenue impact of better coverage",
+        "10% more coverage = how much more?",
+        "What does coverage improvement give me?",
+        "Coverage to revenue conversion"
+      ]
+    },
+    {
+      "questionNumber": 406,
+      "canonicalQuestion": "Which single lever would have the most impact on my revenue?",
+      "variants": [
+        "What's the #1 thing I should fix?",
+        "Biggest lever for revenue",
+        "Sabse important kya hai?",
+        "One thing to move the needle",
+        "Priority #1"
+      ]
+    },
+    {
+      "questionNumber": 407,
+      "canonicalQuestion": "If I could fix one thing this month, what should it be?",
+      "variants": [
+        "What should I focus on?",
+        "Ek cheez batao jo fix karni hai",
+        "Biggest fire to fight",
+        "Top priority this month",
+        "Where to spend my energy?"
+      ]
+    },
+    {
+      "questionNumber": 417,
+      "canonicalQuestion": "What is the ramp-up time for a new hire (months to reach median productivity)?",
+      "variants": [
+        "How long before a new guy is productive?",
+        "Naya aadmi kitne time mein set hota hai?",
+        "Onboarding speed",
+        "Time to productivity — new hire",
+        "Ramp up time"
+      ]
+    },
+    {
+      "questionNumber": 420,
+      "canonicalQuestion": "Which ASMs have the best-performing teams consistently?",
+      "variants": [
+        "Best ASMs by team performance",
+        "Kiske neeche best team hai?",
+        "Manager effectiveness ranking",
+        "Which managers are delivering?",
+        "ASM leaderboard by team results"
+      ]
+    },
+    {
+      "questionNumber": 435,
+      "canonicalQuestion": "What is my revenue split between General Trade (GT) and Modern Trade (MT)?",
+      "variants": [
+        "GT vs MT split",
+        "How much from GT, how much from MT?",
+        "Channel wise revenue",
+        "General trade kitna, modern trade kitna?",
+        "GT-MT ratio"
+      ]
+    },
+    {
+      "questionNumber": 449,
+      "canonicalQuestion": "How does e-commerce cannibalize my GT revenue in urban markets?",
+      "variants": [
+        "Is online eating my GT business?",
+        "E-commerce vs GT in cities",
+        "Online ki wajah se GT mein girawat?",
+        "Digital cannibalization",
+        "Is Amazon hurting my kirana sales?"
+      ]
+    }
+  ]
+}

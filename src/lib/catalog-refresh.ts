@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import type { DataSource } from 'typeorm';
 import { ASK_CATALOG_MANIFEST, type CatalogColumnHint, type CatalogTableHint } from './ask-catalog-manifest';
 import { buildGraphSnapshot, warmGraphCache } from './ask-graph-cache';
-import type { SemanticRefreshRecords } from './fmcg-taxonomy';
+import { buildSemanticRefreshRecords, type SemanticRefreshRecords } from './fmcg-taxonomy';
 
 export type TenantCatalogTarget = {
   id: number;
@@ -1166,6 +1166,8 @@ export async function refreshCatalogForTenant(
     const columns = await loadColumns(db);
     const { tableRecords, columnRecords, relationshipRecords, aliasRecords } = buildCatalogRecords(tenant, columns);
     await insertCatalogRecords(db, tenant.id, tableRecords, columnRecords, relationshipRecords, aliasRecords);
+    const semanticRecords = buildSemanticRefreshRecords(tenant, refreshId, undefined, relationshipRecords);
+    await insertSemanticRecords(db, tenant.id, semanticRecords);
     await db.query(
       `
       update ask_catalog_refreshes

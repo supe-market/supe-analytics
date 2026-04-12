@@ -1,5 +1,5 @@
-import fs from 'node:fs';
 import { randomUUID } from 'crypto';
+import compiledTaxonomyJson from './data/fmcg-taxonomy.compiled.json';
 
 type TenantCatalogTarget = {
   id: number;
@@ -146,7 +146,7 @@ export type SemanticRefreshRecords = {
   thresholdPolicies: SemanticThresholdPolicyRecord[];
 };
 
-type ParsedCluster = {
+type CompiledCluster = {
   clusterNumber: number;
   title: string;
   questionCount: number;
@@ -159,11 +159,25 @@ type ParsedCluster = {
   }>;
 };
 
-type ParsedVariantBlock = {
+type CompiledVariantBlock = {
   questionNumber: number;
   canonicalQuestion: string;
   variants: string[];
 };
+
+type CompiledTaxonomy = {
+  version: string;
+  source: string;
+  clusterCount: number;
+  questionCount: number;
+  variantBlockCount: number;
+  variantCount: number;
+  clusters: CompiledCluster[];
+  variantLibrary: CompiledVariantBlock[];
+};
+
+const COMPILED_TAXONOMY_SOURCE = 'repo:supe-analytics/src/lib/data/fmcg-taxonomy.compiled.json';
+const COMPILED_TAXONOMY = compiledTaxonomyJson as CompiledTaxonomy;
 
 const ENTITY_ALIASES: Record<string, string[]> = {
   salesman: ['salesman', 'salesmen', 'rep', 'mr', 'sr'],
@@ -229,76 +243,6 @@ function buildSearchText(parts: Array<string | null | undefined>): string {
     .map((part) => part.trim().toLowerCase())
     .filter(Boolean)
     .join(' ');
-}
-
-function resolveTaxonomySourcePath(sourcePath?: string): string {
-  const candidate = sourcePath || process.env.ASK_TAXONOMY_MARKDOWN_PATH;
-  if (candidate && fs.existsSync(candidate)) {
-    return candidate;
-  }
-  throw new Error('FMCG taxonomy markdown file not found. Pass a source path or set ASK_TAXONOMY_MARKDOWN_PATH.');
-}
-
-function extractSection(text: string, heading: string): string {
-  const start = text.indexOf(heading);
-  if (start < 0) {
-    return '';
-  }
-  const rest = text.slice(start + heading.length);
-  const nextHeading = rest.search(/\n# /);
-  return nextHeading >= 0 ? rest.slice(0, nextHeading) : rest;
-}
-
-function parseClusterSection(section: string): ParsedCluster[] {
-  const blocks = section.split(/\n### CLUSTER /).slice(1);
-  return blocks.map((block) => {
-    const lines = block.split('\n');
-    const headerLine = lines.shift() || '';
-    const headerMatch = headerLine.match(/^(\d+):\s*(.+?)\s*\((\d+)\s+questions\)/i);
-    if (!headerMatch) {
-      throw new Error(`Unable to parse taxonomy cluster header: ${headerLine}`);
-    }
-    const clusterNumber = Number(headerMatch[1]);
-    const title = headerMatch[2].trim();
-    const questionCount = Number(headerMatch[3]);
-    const questions = lines
-      .filter((line) => /^\|\s*\d+\s*\|/.test(line))
-      .map((line) => {
-        const cells = line
-          .split('|')
-          .map((cell) => cell.trim())
-          .filter(Boolean);
-        if (cells.length < 5 || cells[0] === '#') {
-          return null;
-        }
-        return {
-          questionNumber: Number(cells[0]),
-          question: cells[1],
-          source: cells[2],
-          level: cells[3],
-          entity: cells[4],
-        };
-      })
-      .filter(Boolean) as ParsedCluster['questions'];
-    return { clusterNumber, title, questionCount, questions };
-  });
-}
-
-function parseVariantSection(section: string): Map<number, ParsedVariantBlock> {
-  const variants = new Map<number, ParsedVariantBlock>();
-  const matches = Array.from(section.matchAll(/\*\*Q(\d+):\s*(.+?)\*\*\n([\s\S]*?)(?=\n\*\*Q|\n### CLUSTER |\s*$)/g));
-  for (const match of matches) {
-    const questionNumber = Number(match[1]);
-    const canonicalQuestion = match[2].trim();
-    const body = match[3];
-    const rows = body
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => /^\d+\.\s+/.test(line))
-      .map((line) => line.replace(/^\d+\.\s+/, '').trim());
-    variants.set(questionNumber, { questionNumber, canonicalQuestion, variants: rows });
-  }
-  return variants;
 }
 
 function buildEntityRecords(tenant: TenantCatalogTarget, canonicalQuestions: CanonicalQuestionRecord[]): SemanticEntityRecord[] {
@@ -407,7 +351,7 @@ function buildDatePolicies(
 export function buildSemanticRefreshRecords(
   tenant: TenantCatalogTarget,
   refreshId: string,
-  sourcePath: string,
+  sourcePath: string | undefined,
   relationshipRows: Array<{
     fromTable: string;
     fromColumn: string;
@@ -418,12 +362,11 @@ export function buildSemanticRefreshRecords(
     source: string;
   }>
 ): SemanticRefreshRecords {
-  const resolvedSourcePath = resolveTaxonomySourcePath(sourcePath);
-  const text = fs.readFileSync(resolvedSourcePath, 'utf8');
-  const taxonomySection = extractSection(text, '# 3. Master Question Taxonomy');
-  const variantsSection = extractSection(text, '# 4. Natural Language Variant Library');
-  const parsedClusters = parseClusterSection(taxonomySection);
-  const parsedVariants = parseVariantSection(variantsSection);
+  const resolvedSourcePath = sourcePath || COMPILED_TAXONOMY_SOURCE;
+  const parsedClusters = COMPILED_TAXONOMY.clusters;
+  const parsedVariants = new Map<number, CompiledVariantBlock>(
+    COMPILED_TAXONOMY.variantLibrary.map((variantBlock) => [variantBlock.questionNumber, variantBlock])
+  );
 
   const semanticPack: SemanticPackRecord = {
     id: randomUUID(),
