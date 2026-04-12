@@ -216,7 +216,6 @@ test('persistOrdersBookRows uses bulk stage queries and refreshes analytics inli
   internal.recomputeTargetProgressInternal = async () => {
     targetsRecomputed = true;
   };
-
   const normalizedRows = internal.normalizeOrdersBookRows([buildValidOrdersBookRow()]);
   const publishResult = await internal.persistOrdersBookRows(42, 7, normalizedRows, 'worker-1');
 
@@ -224,7 +223,7 @@ test('persistOrdersBookRows uses bulk stage queries and refreshes analytics inli
   assert.equal(seededTenantId, 42);
   assert.equal(snapshotsRefreshed, true);
   assert.equal(targetsRecomputed, true);
-  assert.equal(publishResult.refreshJobId, 501);
+  assert.equal(publishResult.coreRefreshJobId, 501);
   assert.equal(publishResult.signalRunId, 77);
 
   const seenSql = calls.map((call) => normalizeSql(call.sql));
@@ -240,7 +239,6 @@ test('persistOrdersBookRows uses bulk stage queries and refreshes analytics inli
     'insert into sales_order_items',
     'insert into order_payments',
     'insert into tenant_refresh_jobs',
-    'insert into tenant_refresh_job_imports',
     "update tenant_refresh_jobs set status = $2"
   ];
 
@@ -252,7 +250,7 @@ test('persistOrdersBookRows uses bulk stage queries and refreshes analytics inli
   assert.ok(!seenSql.some((sql) => sql.includes('canonical_record_sources')), 'expected no canonical lineage writes');
 });
 
-test('attachImportToRefreshJob coalesces onto a running job and marks it for rerun', async () => {
+test('attachImportToAskReadinessJob coalesces onto a running job and marks it for rerun', async () => {
   const calls: QueryCall[] = [];
   const runner = createQueryRunner((sql: string, params?: any[]) => {
     calls.push({ sql, params: params || [] });
@@ -274,7 +272,7 @@ test('attachImportToRefreshJob coalesces onto a running job and marks it for rer
   });
 
   const service = new SupeV1Service({} as any);
-  const refreshJob = await (service as any).attachImportToRefreshJob(runner, 42, 77);
+  const refreshJob = await (service as any).attachImportToAskReadinessJob(runner, 42, 77);
 
   assert.equal(refreshJob.id, 61);
   assert.equal(refreshJob.status, 'RUNNING');
@@ -341,10 +339,14 @@ test('refreshTenantState runs analytics-derived refresh before catalog refresh',
   internal.refreshCatalogState = async () => {
     steps.push('catalog');
     return {
+      refreshId: 'catalog-refresh-1',
       refreshedTables: 3,
       refreshedColumns: 4,
       refreshedRelationships: 5,
-      refreshedAliases: 6
+      refreshedAliases: 6,
+      semanticPackVersionId: 'semantic-pack-1',
+      graphWarmed: true,
+      askReady: true
     };
   };
 
@@ -354,12 +356,46 @@ test('refreshTenantState runs analytics-derived refresh before catalog refresh',
   assert.deepEqual(result, {
     signalRunId: 77,
     catalog: {
+      refreshId: 'catalog-refresh-1',
       refreshedTables: 3,
       refreshedColumns: 4,
       refreshedRelationships: 5,
-      refreshedAliases: 6
+      refreshedAliases: 6,
+      semanticPackVersionId: 'semantic-pack-1',
+      graphWarmed: true,
+      askReady: true
     }
   });
+});
+
+test('refreshTenantState fails when Ask catalog readiness verification does not pass', async () => {
+  const service = new SupeV1Service({ createQueryRunner: () => createQueryRunner(async () => []) } as any);
+  const internal = service as any;
+
+  internal.resolveTenantCatalogTarget = async () => ({ id: 42, tenantCode: 'supe-vc-bc30a4' });
+  internal.seedStaticData = async () => {};
+  internal.refreshSnapshots = async () => ({
+    snapshotDate: '2026-04-03',
+    periodStart: '2026-04-01',
+    periodEnd: '2026-04-03'
+  });
+  internal.evaluateSignalsInternal = async () => 77;
+  internal.recomputeTargetProgressInternal = async () => {};
+  internal.refreshCatalogState = async () => ({
+    refreshId: 'catalog-refresh-1',
+    refreshedTables: 0,
+    refreshedColumns: 4,
+    refreshedRelationships: 5,
+    refreshedAliases: 6,
+    semanticPackVersionId: '',
+    graphWarmed: false,
+    askReady: false
+  });
+
+  await assert.rejects(
+    () => service.refreshTenantState(42, 'worker-1'),
+    /Ask semantic catalog is not ready/
+  );
 });
 
 test('evaluateSignalsInternal normalizes snapshot dates before building SQL date windows', async () => {
@@ -423,7 +459,8 @@ test('listObserveEntity salesman route query resolves beats through beat_outlets
         return [];
       }
       return [];
-    }
+    },
+    createQueryRunner: () => createQueryRunner(async () => [])
   };
 
   const service = new SupeV1Service(db as any);
@@ -480,7 +517,8 @@ test('processNextQueuedImport completes imports after canonical writes and inlin
         ];
       }
       return [];
-    }
+    },
+    createQueryRunner: () => createQueryRunner(async () => [])
   };
 
   const service = new SupeV1Service(db as any);
@@ -491,10 +529,18 @@ test('processNextQueuedImport completes imports after canonical writes and inlin
   internal.persistOrdersBookRows = async (_tenantId: number, _batchId: number, rows: any[], _workerId: string) => {
     persistedRows = rows;
     return {
-      refreshJobId: 700,
+      coreRefreshJobId: 700,
       signalRunId: 1
     };
   };
+  internal.attachImportToAskReadinessJob = async () => ({
+    id: 900,
+    status: 'QUEUED',
+    requestedAt: '2026-04-03T00:00:06.000Z',
+    startedAt: null,
+    completedAt: null,
+    error: null
+  });
 
   const result = await service.processNextQueuedImport('worker-1');
 
@@ -507,7 +553,8 @@ test('processNextQueuedImport completes imports after canonical writes and inlin
   assert.equal(completedUpdate?.params[0], 77);
   assert.equal(completedUpdate?.params[1], 1);
   assert.equal(completedUpdate?.params[2], ORDERS_BOOK_HEADERS.length);
-  assert.match(String(completedUpdate?.params[3]), /analytics refreshed/);
+  assert.match(String(completedUpdate?.params[3]), /Import committed; core refresh completed/);
+  assert.match(String(completedUpdate?.params[3]), /Ask preparation queued/);
   assert.ok(!normalizedQueries.some((sql) => sql.includes('post_import_failed')), 'expected no inline post-import failure path');
 });
 
@@ -624,15 +671,24 @@ test('processNextQueuedImport tolerates raw driver update-return shapes', async 
         ];
       }
       return [];
-    }
+    },
+    createQueryRunner: () => createQueryRunner(async () => [])
   };
 
   const service = new SupeV1Service(db as any);
   const internal = service as any;
   internal.downloadFromS3 = async () => buildWorkbookBuffer();
   internal.persistOrdersBookRows = async () => ({
-    refreshJobId: 701,
+    coreRefreshJobId: 701,
     signalRunId: 1
+  });
+  internal.attachImportToAskReadinessJob = async () => ({
+    id: 901,
+    status: 'QUEUED',
+    requestedAt: '2026-04-03T00:00:06.000Z',
+    startedAt: null,
+    completedAt: null,
+    error: null
   });
 
   const result = await service.processNextQueuedImport('worker-variant');
@@ -651,7 +707,7 @@ test('processNextQueuedRefreshJob finalizes successful refresh jobs', async () =
   const db = {
     query: async (sql: string) => {
       if (normalizeSql(sql).includes("from tenant_refresh_jobs") && normalizeSql(sql).includes("status = 'queued'")) {
-        return [{ id: 91, tenant_id: 42 }];
+        return [{ id: 91, tenant_id: 42, trigger_metadata: {} }];
       }
       return [];
     }
@@ -664,10 +720,14 @@ test('processNextQueuedRefreshJob finalizes successful refresh jobs', async () =
   internal.refreshTenantState = async () => ({
     signalRunId: 55,
     catalog: {
+      refreshId: 'catalog-refresh-1',
       refreshedTables: 10,
       refreshedColumns: 20,
       refreshedRelationships: 5,
-      refreshedAliases: 7
+      refreshedAliases: 7,
+      semanticPackVersionId: 'semantic-pack-1',
+      graphWarmed: true,
+      askReady: true
     }
   });
   internal.finalizeRefreshJob = async (...args: any[]) => {
@@ -680,11 +740,58 @@ test('processNextQueuedRefreshJob finalizes successful refresh jobs', async () =
   assert.deepEqual(finalizedArgs, [91, 'COMPLETED', null]);
 });
 
+test('processNextQueuedRefreshJob runs ask-readiness-only jobs without full analytics refresh', async () => {
+  const db = {
+    query: async (sql: string) => {
+      if (normalizeSql(sql).includes("from tenant_refresh_jobs") && normalizeSql(sql).includes("status = 'queued'")) {
+        return [{ id: 191, tenant_id: 42, trigger_metadata: { kind: 'ASK_READINESS' } }];
+      }
+      return [];
+    }
+  };
+
+  const service = new SupeV1Service(db as any);
+  const internal = service as any;
+  let finalizedArgs: any[] | null = null;
+  let fullRefreshCalled = false;
+  let askRefreshCalled = false;
+
+  internal.refreshTenantState = async () => {
+    fullRefreshCalled = true;
+    throw new Error('should not run full refresh');
+  };
+  internal.refreshAskReadiness = async () => {
+    askRefreshCalled = true;
+    return {
+      catalog: {
+        refreshId: 'catalog-refresh-ask-1',
+        refreshedTables: 10,
+        refreshedColumns: 20,
+        refreshedRelationships: 5,
+        refreshedAliases: 7,
+        semanticPackVersionId: 'semantic-pack-1',
+        graphWarmed: true,
+        askReady: true
+      }
+    };
+  };
+  internal.finalizeRefreshJob = async (...args: any[]) => {
+    finalizedArgs = args;
+  };
+
+  const result = await service.processNextQueuedRefreshJob('refresh-worker-ask');
+
+  assert.equal(result, true);
+  assert.equal(fullRefreshCalled, false);
+  assert.equal(askRefreshCalled, true);
+  assert.deepEqual(finalizedArgs, [191, 'COMPLETED', null]);
+});
+
 test('processNextQueuedRefreshJob records failed refresh jobs without failing completed imports', async () => {
   const db = {
     query: async (sql: string) => {
       if (normalizeSql(sql).includes("from tenant_refresh_jobs") && normalizeSql(sql).includes("status = 'queued'")) {
-        return [{ id: 92, tenant_id: 42 }];
+        return [{ id: 92, tenant_id: 42, trigger_metadata: {} }];
       }
       return [];
     }

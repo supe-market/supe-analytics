@@ -299,7 +299,7 @@ type RefreshJobSummary = {
 };
 
 type ImportPublishResult = {
-  refreshJobId: number | null;
+  coreRefreshJobId: number | null;
   signalRunId: number;
 };
 
@@ -661,6 +661,14 @@ export class SupeV1Service {
 
   protected async refreshCatalogState(tenant: TenantCatalogTarget, triggeredBy: string): Promise<CatalogRefreshResult> {
     return refreshCatalogForTenant(this.db, tenant, triggeredBy);
+  }
+
+  private async updateImportBatchNote(batchId: number, note: string): Promise<void> {
+    try {
+      await this.db.query(`update import_batches set notes = $2 where id = $1`, [batchId, note]);
+    } catch (_error) {
+      // Batch-note updates are operator-facing only and must never break the import.
+    }
   }
 
   private async uploadToS3(tenantCode: string, fileName: string, buffer: Buffer, contentType: string): Promise<string> {
@@ -3875,7 +3883,7 @@ export class SupeV1Service {
     );
   }
 
-  private async attachImportToRefreshJob(
+  private async attachImportToAskReadinessJob(
     runner: QueryRunner,
     tenantId: number,
     batchId: number
@@ -3884,7 +3892,9 @@ export class SupeV1Service {
       `
       select id, status, requested_at, started_at, completed_at, error_text
       from tenant_refresh_jobs
-      where tenant_id = $1 and status = 'QUEUED'
+      where tenant_id = $1
+        and status = 'QUEUED'
+        and coalesce(trigger_metadata->>'kind', '') = 'ASK_READINESS'
       order by requested_at asc
       for update
       limit 1
@@ -3909,7 +3919,9 @@ export class SupeV1Service {
       `
       select id, status, requested_at, started_at, completed_at, error_text
       from tenant_refresh_jobs
-      where tenant_id = $1 and status = 'RUNNING'
+      where tenant_id = $1
+        and status = 'RUNNING'
+        and coalesce(trigger_metadata->>'kind', '') = 'ASK_READINESS'
       order by started_at asc
       for update
       limit 1
@@ -3946,7 +3958,7 @@ export class SupeV1Service {
         values ($1, 'QUEUED', $2::jsonb)
         returning id, status, requested_at, started_at, completed_at, error_text
         `,
-        [tenantId, JSON.stringify({ trigger: 'import', importBatchId: batchId })]
+        [tenantId, JSON.stringify({ trigger: 'import', importBatchId: batchId, kind: 'ASK_READINESS' })]
       );
       const created = this.refreshJobSummaryFromRow(createdRows[0]);
       await runner.query(
@@ -3960,6 +3972,32 @@ export class SupeV1Service {
       );
       return created;
     } catch (error: any) {
+      const activeAskRows = await runner.query(
+        `
+        select id, status, requested_at, started_at, completed_at, error_text
+        from tenant_refresh_jobs
+        where tenant_id = $1
+          and status in ('QUEUED', 'RUNNING')
+          and coalesce(trigger_metadata->>'kind', '') = 'ASK_READINESS'
+        order by case status when 'RUNNING' then 0 else 1 end, requested_at asc
+        limit 1
+        `,
+        [tenantId]
+      );
+      if (activeAskRows.length) {
+        const existing = this.refreshJobSummaryFromRow(activeAskRows[0]);
+        await runner.query(
+          `
+          insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+          values ($1, $2)
+          on conflict (import_batch_id)
+          do update set refresh_job_id = excluded.refresh_job_id
+          `,
+          [existing.id, batchId]
+        );
+        return existing;
+      }
+
       const retriedRows = await runner.query(
         `
         select id, status, requested_at, started_at, completed_at, error_text
@@ -4003,18 +4041,9 @@ export class SupeV1Service {
       values ($1, 'RUNNING', now(), $2::jsonb)
       returning id, status, requested_at, started_at, completed_at, error_text
       `,
-      [tenantId, JSON.stringify({ trigger: 'inline_import_refresh', importBatchId: batchId })]
+      [tenantId, JSON.stringify({ trigger: 'inline_import_refresh', importBatchId: batchId, kind: 'CORE_ANALYTICS' })]
     );
     const refreshJob = this.refreshJobSummaryFromRow(rows[0]);
-    await runner.query(
-      `
-      insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
-      values ($1, $2)
-      on conflict (import_batch_id)
-      do update set refresh_job_id = excluded.refresh_job_id
-      `,
-      [refreshJob.id, batchId]
-    );
     return refreshJob;
   }
 
@@ -4044,7 +4073,7 @@ export class SupeV1Service {
     try {
       const rows = await runner.query(
         `
-        select id, tenant_id, status, started_at, rerun_requested
+        select id, tenant_id, status, started_at, rerun_requested, trigger_metadata
         from tenant_refresh_jobs
         where id = $1
         for update
@@ -4070,13 +4099,18 @@ export class SupeV1Service {
       );
 
       if (row.rerun_requested) {
+        const nextTriggerMetadata = {
+          ...(row.trigger_metadata || {}),
+          trigger: 'rerun_after_running_job',
+          previousRefreshJobId: jobId
+        };
         const createdRows = await runner.query(
           `
           insert into tenant_refresh_jobs (tenant_id, status, trigger_metadata)
           values ($1, 'QUEUED', $2::jsonb)
           returning id
           `,
-          [Number(row.tenant_id), JSON.stringify({ trigger: 'rerun_after_running_job', previousRefreshJobId: jobId })]
+          [Number(row.tenant_id), JSON.stringify(nextTriggerMetadata)]
         );
         const nextJobId = Number(createdRows[0]?.id || 0);
         if (nextJobId) {
@@ -4101,6 +4135,65 @@ export class SupeV1Service {
     }
   }
 
+  private async recordAskReadinessEnqueueFailure(
+    tenantId: number,
+    batchId: number,
+    errorText: string
+  ): Promise<RefreshJobSummary | null> {
+    const runner = this.db.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const rows = await runner.query(
+        `
+        insert into tenant_refresh_jobs (
+          tenant_id,
+          status,
+          error_text,
+          completed_at,
+          trigger_metadata
+        )
+        values ($1, 'FAILED', $2, now(), $3::jsonb)
+        returning id, status, requested_at, started_at, completed_at, error_text
+        `,
+        [
+          tenantId,
+          errorText,
+          JSON.stringify({ trigger: 'ask_readiness_enqueue_failed', importBatchId: batchId, kind: 'ASK_READINESS' })
+        ]
+      );
+      const refreshJob = this.refreshJobSummaryFromRow(rows[0]);
+      await runner.query(
+        `
+        insert into tenant_refresh_job_imports (refresh_job_id, import_batch_id)
+        values ($1, $2)
+        on conflict (import_batch_id)
+        do update set refresh_job_id = excluded.refresh_job_id
+        `,
+        [refreshJob.id, batchId]
+      );
+      await runner.commitTransaction();
+      return refreshJob;
+    } catch (error) {
+      await runner.rollbackTransaction();
+      return null;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  private async refreshAskReadiness(
+    tenantId: number,
+    triggeredBy: string
+  ): Promise<{ catalog: CatalogRefreshResult }> {
+    const tenant = await this.resolveTenantCatalogTarget(tenantId);
+    const catalog = await this.refreshCatalogState(tenant, triggeredBy);
+    if (!catalog.askReady || !catalog.graphWarmed || !catalog.semanticPackVersionId || catalog.refreshedTables <= 0) {
+      throw new Error('Ask semantic catalog is not ready for this tenant');
+    }
+    return { catalog };
+  }
+
   private async persistOrdersBookRows(
     tenantId: number,
     batchId: number,
@@ -4111,6 +4204,8 @@ export class SupeV1Service {
 
     const runner = this.db.createQueryRunner();
     const stageTable = this.stageTableName(batchId);
+    let refreshJobId: number | null = null;
+    let signalRunId = 0;
     await runner.connect();
     await runner.startTransaction();
     try {
@@ -4146,12 +4241,14 @@ export class SupeV1Service {
       console.log(`[import:${batchId}] upsert_payments_done`);
 
       const refreshJob = await this.createInlineRefreshJob(runner, tenantId, batchId);
+      refreshJobId = refreshJob.id;
       console.log(`[import:${batchId}] refresh_job_started job_id=${refreshJob.id} status=${refreshJob.status}`);
 
+      await this.updateImportBatchNote(batchId, 'refreshing analytics');
       const snapshotRefresh = await this.refreshSnapshots(runner, tenantId);
       console.log(`[import:${batchId}] refresh_snapshots_done`);
 
-      const signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
+      signalRunId = await this.evaluateSignalsInternal(runner, tenantId, triggeredBy);
       console.log(`[import:${batchId}] refresh_signals_done signal_run=${signalRunId}`);
 
       await this.recomputeTargetProgressInternal(runner, tenantId, snapshotRefresh.snapshotDate);
@@ -4161,16 +4258,28 @@ export class SupeV1Service {
       console.log(`[import:${batchId}] refresh_job_completed job_id=${refreshJob.id}`);
 
       await runner.commitTransaction();
-      return {
-        refreshJobId: refreshJob.id,
-        signalRunId
-      };
     } catch (error) {
+      if (refreshJobId) {
+        try {
+          await this.finalizeInlineRefreshJob(runner, refreshJobId, 'FAILED', String((error as any)?.message || 'inline refresh failed'));
+        } catch {
+          // best effort; the surrounding transaction rollback remains authoritative
+        }
+      }
       await runner.rollbackTransaction();
       throw error;
     } finally {
       await runner.release();
     }
+
+    if (!refreshJobId) {
+      throw new Error('refresh job was not created for imported batch');
+    }
+
+    return {
+      coreRefreshJobId: refreshJobId,
+      signalRunId
+    };
   }
 
   public async refreshTenantState(
@@ -4197,6 +4306,9 @@ export class SupeV1Service {
     }
 
     const catalog = await this.refreshCatalogState(tenant, triggeredBy);
+    if (!catalog.askReady || !catalog.graphWarmed || !catalog.semanticPackVersionId || catalog.refreshedTables <= 0) {
+      throw new Error('Ask semantic catalog is not ready for this tenant');
+    }
     return { signalRunId, catalog };
   }
 
@@ -4382,6 +4494,27 @@ export class SupeV1Service {
       await phase('persist_rows');
       const publishResult = await this.persistOrdersBookRows(batch.tenantId, batchId, normalizedRows, workerId);
       console.log(`[import:${batchId}] persist_rows_done`);
+      let askRefreshJob: RefreshJobSummary | null = null;
+      let askQueueError: string | null = null;
+      try {
+        await phase('queue_ask_readiness');
+        const runner = this.db.createQueryRunner();
+        await runner.connect();
+        await runner.startTransaction();
+        try {
+          askRefreshJob = await this.attachImportToAskReadinessJob(runner, batch.tenantId, batchId);
+          await runner.commitTransaction();
+        } catch (error) {
+          await runner.rollbackTransaction();
+          throw error;
+        } finally {
+          await runner.release();
+        }
+      } catch (error: any) {
+        askQueueError = String(error?.message || 'Ask preparation could not be scheduled');
+        askRefreshJob = await this.recordAskReadinessEnqueueFailure(batch.tenantId, batchId, askQueueError);
+      }
+
       await this.db.query(
         `
         update import_batches
@@ -4400,9 +4533,13 @@ export class SupeV1Service {
           normalizedRows.length,
           headers.length,
           [
-            publishResult.refreshJobId
-              ? `Import committed; analytics refreshed (#${publishResult.refreshJobId})`
-              : 'Import committed; analytics refreshed',
+            publishResult.coreRefreshJobId
+              ? `Import committed; core refresh completed (#${publishResult.coreRefreshJobId})`
+              : 'Import committed; core refresh completed',
+            askRefreshJob
+              ? `Ask preparation ${String(askRefreshJob.status || '').toLowerCase()} (#${askRefreshJob.id})`
+              : null,
+            askQueueError ? `Ask preparation scheduling failed: ${askQueueError}` : null,
             generatedImportSummary
           ]
             .filter(Boolean)
@@ -4441,21 +4578,26 @@ export class SupeV1Service {
           updated_at = now()
       from candidate
       where trj.id = candidate.id
-      returning trj.id, trj.tenant_id
+      returning trj.id, trj.tenant_id, trj.trigger_metadata
       `
     );
-    const rows = this.normalizeReturnedRows<{ id?: number | string; tenant_id?: number | string }>(rawResult);
+    const rows = this.normalizeReturnedRows<{ id?: number | string; tenant_id?: number | string; trigger_metadata?: any }>(rawResult);
     const refreshJobId = Number(rows[0]?.id || 0);
     const tenantId = Number(rows[0]?.tenant_id || 0);
+    const triggerMetadata = rows[0]?.trigger_metadata || {};
+    const refreshKind = String(triggerMetadata?.kind || 'FULL_REFRESH').toUpperCase();
     if (!refreshJobId || !tenantId) {
       return false;
     }
 
     try {
-      const result = await this.refreshTenantState(tenantId, workerId);
+      const result =
+        refreshKind === 'ASK_READINESS'
+          ? await this.refreshAskReadiness(tenantId, workerId)
+          : await this.refreshTenantState(tenantId, workerId);
       await this.finalizeRefreshJob(refreshJobId, 'COMPLETED', null);
       console.log(
-        `[refresh-job:${refreshJobId}] refresh_job_done signal_run=${result.signalRunId} catalog_tables=${result.catalog.refreshedTables}`
+        `[refresh-job:${refreshJobId}] refresh_job_done kind=${refreshKind} signal_run=${'signalRunId' in result ? result.signalRunId : 'n/a'} catalog_tables=${result.catalog.refreshedTables}`
       );
     } catch (error: any) {
       const errorMessage = String(error?.message || 'unknown error');

@@ -88,7 +88,7 @@ test('loadTaxonomyToDatabase builds semantic records and persists them for a ten
   }
 });
 
-test('refreshCatalogForTenant no longer writes semantic-pack tables', async () => {
+test('refreshCatalogForTenant fails when semantic-pack readiness is missing', async () => {
   const calls: string[] = [];
   const db = {
     async query(sql: string) {
@@ -114,16 +114,9 @@ test('refreshCatalogForTenant no longer writes semantic-pack tables', async () =
     }
   };
 
-  const result = await refreshCatalogForTenant(db as any, { id: 12, tenantCode: 'tenant-12' }, 'tester');
-
-  assert.deepEqual(result, {
-    refreshedTables: 0,
-    refreshedColumns: 0,
-    refreshedRelationships: 0,
-    refreshedAliases: 0
-  });
-  assert.equal(calls.some((sql) => normalizeSql(sql).includes('insert into ask_semantic_')), false);
-  assert.equal(calls.some((sql) => normalizeSql(sql).includes('delete from ask_semantic_')), false);
-  assert.equal(calls.some((sql) => normalizeSql(sql).includes('insert into ask_question_clusters')), false);
-  assert.equal(calls.some((sql) => normalizeSql(sql).includes('insert into ask_date_policies')), false);
+  await assert.rejects(
+    () => refreshCatalogForTenant(db as any, { id: 12, tenantCode: 'tenant-12' }, 'tester'),
+    /semantic pack version missing after catalog refresh/
+  );
+  assert.equal(calls.some((sql) => normalizeSql(sql).includes('update ask_catalog_refreshes set status = \'failed\'')), true);
 });

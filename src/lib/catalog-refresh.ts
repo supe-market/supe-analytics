@@ -94,10 +94,14 @@ type CatalogAliasRecord = {
 };
 
 export type CatalogRefreshResult = {
+  refreshId: string;
   refreshedTables: number;
   refreshedColumns: number;
   refreshedRelationships: number;
   refreshedAliases: number;
+  semanticPackVersionId: string;
+  graphWarmed: boolean;
+  askReady: boolean;
 };
 
 function titleCase(value: string): string {
@@ -1178,17 +1182,52 @@ export async function refreshCatalogForTenant(
       `,
       [refreshId, tableRecords.length, columnRecords.length, relationshipRecords.length, aliasRecords.length]
     );
-    try {
-      const snapshot = buildGraphSnapshot(tenant.id, refreshId, tableRecords, relationshipRecords, aliasRecords);
-      await warmGraphCache(tenant.id, refreshId, snapshot);
-    } catch (_error) {
-      // Graph cache warmup is best-effort; supe-ask can rebuild from Postgres if Redis is unavailable.
+
+    const semanticPackRows = await db.query(
+      `
+      select id
+      from ask_semantic_pack_versions
+      where tenant_id = $1 and refresh_id = $2
+      order by created_at desc
+      limit 1
+      `,
+      [tenant.id, refreshId]
+    );
+    const semanticPackVersionId = String(semanticPackRows[0]?.id || '');
+    if (!semanticPackVersionId) {
+      throw new Error('semantic pack version missing after catalog refresh');
     }
+
+    const snapshot = buildGraphSnapshot(tenant.id, refreshId, tableRecords, relationshipRecords, aliasRecords);
+    const graphWarmed = await warmGraphCache(tenant.id, refreshId, snapshot);
+    if (!graphWarmed) {
+      throw new Error('Ask graph cache warm failed');
+    }
+
+    const readinessRows = await db.query(
+      `
+      select status, refreshed_tables
+      from ask_catalog_refreshes
+      where id = $1 and tenant_id = $2
+      limit 1
+      `,
+      [refreshId, tenant.id]
+    );
+    const catalogStatus = String(readinessRows[0]?.status || '');
+    const refreshedTables = Number(readinessRows[0]?.refreshed_tables || 0);
+    if (catalogStatus !== 'completed' || refreshedTables <= 0) {
+      throw new Error('Ask catalog refresh readiness verification failed');
+    }
+
     return {
+      refreshId,
       refreshedTables: tableRecords.length,
       refreshedColumns: columnRecords.length,
       refreshedRelationships: relationshipRecords.length,
-      refreshedAliases: aliasRecords.length
+      refreshedAliases: aliasRecords.length,
+      semanticPackVersionId,
+      graphWarmed,
+      askReady: true
     };
   } catch (error: any) {
     await db.query(
