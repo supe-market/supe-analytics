@@ -61,6 +61,55 @@ test('loadTaxonomyToDatabase builds semantic records and persists them for a ten
   assert.equal(records.joinPolicies.length, 1);
 });
 
+test('loadTaxonomyToDatabase groups duplicate table-pair relationships into one join policy', async () => {
+  const db = {
+    async query(sql: string, params?: unknown[]) {
+      const normalized = normalizeSql(sql);
+      if (normalized.includes('select id, tenant_code from tenants')) {
+        return [{ id: 12, tenant_code: 'tenant-12' }];
+      }
+      if (normalized.includes('from ask_catalog_relationships')) {
+        assert.deepEqual(params, [12]);
+        return [
+          {
+            fromTable: 'sales_orders',
+            fromColumn: 'salesman_id',
+            toTable: 'salesmen',
+            toColumn: 'id',
+            relationshipType: 'foreign_key',
+            cardinality: 'many_to_one',
+            source: 'database'
+          },
+          {
+            fromTable: 'sales_orders',
+            fromColumn: 'created_by_salesman_id',
+            toTable: 'salesmen',
+            toColumn: 'id',
+            relationshipType: 'foreign_key',
+            cardinality: 'many_to_one',
+            source: 'database'
+          }
+        ];
+      }
+      return [];
+    }
+  };
+
+  const records = await loadTaxonomyToDatabase(
+    db,
+    { tenantId: 12, refreshId: 'refresh-dup-1' },
+    async () => {}
+  );
+
+  assert.equal(records.joinPolicies.length, 1);
+  assert.equal(records.joinPolicies[0].policyKey, 'sales_orders__salesmen');
+  assert.equal(records.joinPolicies[0].preferred, true);
+  assert.deepEqual(
+    records.joinPolicies[0].joinEdges.map((edge: any) => edge.fromColumn),
+    ['created_by_salesman_id', 'salesman_id']
+  );
+});
+
 test('refreshCatalogForTenant fails when semantic-pack readiness is missing', async () => {
   const calls: string[] = [];
   const db = {

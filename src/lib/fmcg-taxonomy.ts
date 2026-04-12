@@ -348,6 +348,89 @@ function buildDatePolicies(
   ];
 }
 
+function buildJoinPolicies(
+  tenant: TenantCatalogTarget,
+  relationshipRows: Array<{
+    fromTable: string;
+    fromColumn: string;
+    toTable: string;
+    toColumn: string;
+    relationshipType: string;
+    cardinality: string;
+    source: string;
+  }>
+): SemanticJoinPolicyRecord[] {
+  const grouped = new Map<
+    string,
+    {
+      fromTable: string;
+      toTable: string;
+      edges: Array<{
+        fromTable: string;
+        fromColumn: string;
+        toTable: string;
+        toColumn: string;
+        relationshipType: string;
+        cardinality: string;
+        source: string;
+      }>;
+    }
+  >();
+
+  for (const relationship of relationshipRows) {
+    const policyKey = `${relationship.fromTable}__${relationship.toTable}`;
+    const existing = grouped.get(policyKey);
+    const edge = {
+      fromTable: relationship.fromTable,
+      fromColumn: relationship.fromColumn,
+      toTable: relationship.toTable,
+      toColumn: relationship.toColumn,
+      relationshipType: relationship.relationshipType,
+      cardinality: relationship.cardinality,
+      source: relationship.source,
+    };
+    if (existing) {
+      existing.edges.push(edge);
+      continue;
+    }
+    grouped.set(policyKey, {
+      fromTable: relationship.fromTable,
+      toTable: relationship.toTable,
+      edges: [edge]
+    });
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([policyKey, group]) => {
+      const joinEdges = [...group.edges].sort((left, right) => {
+        const fromComparison = left.fromColumn.localeCompare(right.fromColumn);
+        if (fromComparison !== 0) return fromComparison;
+        const toComparison = left.toColumn.localeCompare(right.toColumn);
+        if (toComparison !== 0) return toComparison;
+        return left.source.localeCompare(right.source);
+      });
+      return {
+        id: randomUUID(),
+        tenantId: tenant.id,
+        policyKey,
+        fromTable: group.fromTable,
+        toTable: group.toTable,
+        viaTables: [],
+        joinEdges,
+        preferred: joinEdges.some((edge) => edge.source === 'database'),
+        searchText: buildSearchText([
+          group.fromTable,
+          group.toTable,
+          ...joinEdges.flatMap((edge) => [edge.fromColumn, edge.toColumn])
+        ]),
+        metadata: {
+          source: 'catalog_relationship',
+        }
+      };
+    });
+}
+
 export function buildSemanticRefreshRecords(
   tenant: TenantCatalogTarget,
   refreshId: string,
@@ -441,30 +524,7 @@ export function buildSemanticRefreshRecords(
 
   const { metrics, metricAliases } = buildMetricRecords(tenant, canonicalQuestions);
   const entities = buildEntityRecords(tenant, canonicalQuestions);
-  const joinPolicies = relationshipRows.map((relationship) => ({
-    id: randomUUID(),
-    tenantId: tenant.id,
-    policyKey: `${relationship.fromTable}__${relationship.toTable}`,
-    fromTable: relationship.fromTable,
-    toTable: relationship.toTable,
-    viaTables: [],
-    joinEdges: [
-      {
-        fromTable: relationship.fromTable,
-        fromColumn: relationship.fromColumn,
-        toTable: relationship.toTable,
-        toColumn: relationship.toColumn,
-        relationshipType: relationship.relationshipType,
-        cardinality: relationship.cardinality,
-        source: relationship.source,
-      }
-    ],
-    preferred: relationship.source === 'database',
-    searchText: buildSearchText([relationship.fromTable, relationship.toTable, relationship.fromColumn, relationship.toColumn]),
-    metadata: {
-      source: 'catalog_relationship',
-    }
-  }));
+  const joinPolicies = buildJoinPolicies(tenant, relationshipRows);
   const datePolicies = buildDatePolicies(tenant, refreshId, canonicalQuestions);
   const thresholdPolicies: SemanticThresholdPolicyRecord[] = [];
 
