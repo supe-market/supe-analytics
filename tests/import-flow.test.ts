@@ -206,6 +206,11 @@ test('persistOrdersBookRows uses bulk stage queries and refreshes analytics inli
   };
   internal.refreshSnapshots = async () => {
     snapshotsRefreshed = true;
+    return {
+      snapshotDate: '2026-04-03',
+      periodStart: '2026-04-01',
+      periodEnd: '2026-04-03'
+    };
   };
   internal.evaluateSignalsInternal = async () => 77;
   internal.recomputeTargetProgressInternal = async () => {
@@ -320,6 +325,11 @@ test('refreshTenantState runs analytics-derived refresh before catalog refresh',
   };
   internal.refreshSnapshots = async () => {
     steps.push('snapshots');
+    return {
+      snapshotDate: '2026-04-03',
+      periodStart: '2026-04-01',
+      periodEnd: '2026-04-03'
+    };
   };
   internal.evaluateSignalsInternal = async () => {
     steps.push('signals');
@@ -499,6 +509,78 @@ test('processNextQueuedImport completes imports after canonical writes and inlin
   assert.equal(completedUpdate?.params[2], ORDERS_BOOK_HEADERS.length);
   assert.match(String(completedUpdate?.params[3]), /analytics refreshed/);
   assert.ok(!normalizedQueries.some((sql) => sql.includes('post_import_failed')), 'expected no inline post-import failure path');
+});
+
+test('normalizeOrdersBookRows derives missing technical identifiers deterministically', () => {
+  const service = new SupeV1Service({} as any);
+  const internal = service as any;
+
+  const buildSparseRow = () =>
+    buildValidOrdersBookRow({
+      'tenant_outlets.tenant_outlet_code': '',
+      'brands.brand_code': '',
+      'sales_order_items.external_line_id': ''
+    });
+
+  const [first] = internal.normalizeOrdersBookRows([buildSparseRow()]);
+  const [second] = internal.normalizeOrdersBookRows([buildSparseRow()]);
+
+  assert.match(first.tenant_outlet_code, /^TOUT_/);
+  assert.match(first.brand_code, /^BR_/);
+  assert.match(first.external_line_id, /^LINE_/);
+  assert.equal(first.generated_tenant_outlet_code, true);
+  assert.equal(first.generated_brand_code, true);
+  assert.equal(first.generated_external_line_id, true);
+  assert.equal(first.tenant_outlet_code, second.tenant_outlet_code);
+  assert.equal(first.brand_code, second.brand_code);
+  assert.equal(first.external_line_id, second.external_line_id);
+});
+
+test('validateOrdersBook only fails when generated identifiers are not derivable', () => {
+  const service = new SupeV1Service({} as any);
+  const internal = service as any;
+
+  const derivableRows = internal.normalizeOrdersBookRows([
+    buildValidOrdersBookRow({
+      'tenant_outlets.tenant_outlet_code': '',
+      'brands.brand_code': '',
+      'sales_order_items.external_line_id': ''
+    })
+  ]);
+  const derivableErrors = internal.validateOrdersBook([...ORDERS_BOOK_HEADERS], derivableRows);
+  assert.equal(
+    derivableErrors.some((error: any) =>
+      ['tenant_outlets.tenant_outlet_code', 'brands.brand_code', 'sales_order_items.external_line_id'].includes(error.column)
+    ),
+    false
+  );
+
+  const missingInputsRows = internal.normalizeOrdersBookRows([
+    buildValidOrdersBookRow({
+      'tenant_outlets.tenant_outlet_code': '',
+      'outlets.outlet_name': '',
+      'outlets.external_outlet_code': '',
+      'brands.brand_code': '',
+      'brands.brand_name': '',
+      'sales_order_items.external_line_id': '',
+      'sales_orders.external_invoice_no': '',
+      'sales_orders.external_order_id': ''
+    })
+  ]);
+  const missingInputErrors = internal.validateOrdersBook([...ORDERS_BOOK_HEADERS], missingInputsRows);
+
+  assert.deepEqual(
+    missingInputErrors
+      .filter((error: any) =>
+        ['tenant_outlets.tenant_outlet_code', 'brands.brand_code', 'sales_order_items.external_line_id'].includes(error.column)
+      )
+      .map((error: any) => [error.column, error.message]),
+    [
+      ['tenant_outlets.tenant_outlet_code', 'could not be derived because outlet_name is blank'],
+      ['brands.brand_code', 'could not be derived because brand_name is blank'],
+      ['sales_order_items.external_line_id', 'could not be derived because order identity is missing']
+    ]
+  );
 });
 
 test('processNextQueuedImport tolerates raw driver update-return shapes', async () => {

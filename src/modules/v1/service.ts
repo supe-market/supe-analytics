@@ -284,6 +284,9 @@ type NormalizedOrdersBookRow = {
   payment_amount: number | null;
   payment_external_ref: string | null;
   payment_identity: string | null;
+  generated_tenant_outlet_code?: boolean;
+  generated_brand_code?: boolean;
+  generated_external_line_id?: boolean;
 };
 
 type RefreshJobSummary = {
@@ -419,6 +422,19 @@ function toDateOnly(input: unknown): string | null {
     return null;
   }
   return formatISTDate(date);
+}
+
+function normalizeCodeFragment(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_{2,}/g, '_')
+    .slice(0, 24);
+}
+
+function shortStableHash(value: string): string {
+  return createHash('sha1').update(value).digest('hex').slice(0, 8).toUpperCase();
 }
 
 function normalizePhone(value: unknown): string {
@@ -2200,6 +2216,73 @@ export class SupeV1Service {
     return value ? value : null;
   }
 
+  private deriveTenantOutletCode(input: {
+    externalOutletCode: string | null;
+    outletName: string | null;
+    distributorCode: string;
+    beatCode: string;
+    salesmanCode: string;
+  }): string | null {
+    if (input.externalOutletCode) {
+      return `TOUT_${normalizeCodeFragment(input.externalOutletCode) || 'OUTLET'}`;
+    }
+    if (!input.outletName) {
+      return null;
+    }
+    const base = normalizeCodeFragment(input.outletName) || 'OUTLET';
+    const hash = shortStableHash(
+      ['tenant_outlet', input.outletName, input.distributorCode, input.beatCode, input.salesmanCode].join('|')
+    );
+    return `TOUT_${base}_${hash}`;
+  }
+
+  private deriveBrandCode(input: { brandName: string | null }): string | null {
+    if (!input.brandName) {
+      return null;
+    }
+    const base = normalizeCodeFragment(input.brandName) || 'BRAND';
+    const hash = shortStableHash(['brand', input.brandName].join('|'));
+    return `BR_${base}_${hash}`;
+  }
+
+  private deriveOrderIdentity(externalInvoiceNo: string | null, externalOrderId: string | null): string | null {
+    if (externalInvoiceNo) {
+      return `INV:${externalInvoiceNo}`;
+    }
+    if (externalOrderId) {
+      return `ORD:${externalOrderId}`;
+    }
+    return null;
+  }
+
+  private deriveExternalLineId(input: {
+    orderIdentity: string | null;
+    skuCode: string;
+    sourceRowNumber: number;
+  }): string | null {
+    if (!input.orderIdentity) {
+      return null;
+    }
+    const skuFragment = normalizeCodeFragment(input.skuCode) || 'SKU';
+    const hash = shortStableHash(['line', input.orderIdentity, input.skuCode, String(input.sourceRowNumber)].join('|'));
+    return `LINE_${skuFragment}_${hash}`;
+  }
+
+  private buildGeneratedImportSummary(rows: NormalizedOrdersBookRow[]): string | null {
+    let outletCodes = 0;
+    let brandCodes = 0;
+    let lineIds = 0;
+    for (const row of rows) {
+      if (row.generated_tenant_outlet_code) outletCodes += 1;
+      if (row.generated_brand_code) brandCodes += 1;
+      if (row.generated_external_line_id) lineIds += 1;
+    }
+    if (!outletCodes && !brandCodes && !lineIds) {
+      return null;
+    }
+    return `Generated IDs: outlets ${outletCodes}, brands ${brandCodes}, lines ${lineIds}`;
+  }
+
   private normalizeOrdersBookRows(rows: OrdersBookRow[]): NormalizedOrdersBookRow[] {
     return rows.map((row, index) => {
       const distributor_code = this.readOrdersBookText(row, 'distributors.distributor_code');
@@ -2224,13 +2307,34 @@ export class SupeV1Service {
       const payment_date = this.readOrdersBookDate(row, 'order_payments.payment_date');
       const payment_mode = this.nullableText(this.readOrdersBookText(row, 'order_payments.payment_mode'));
       const payment_amount = this.readOrdersBookNumber(row, 'order_payments.amount');
-      const orderIdentity = external_invoice_no ? `INV:${external_invoice_no}` : `ORD:${external_order_id || ''}`;
+      const orderIdentity = this.deriveOrderIdentity(external_invoice_no, external_order_id) || `ORD:${external_order_id || ''}`;
       const payment_identity =
         payment_external_ref
           ? `REF:${payment_external_ref}`
           : payment_amount !== null && payment_amount > 0
             ? `${orderIdentity}|DATE:${payment_date || ''}|MODE:${payment_mode || ''}|AMT:${String(payment_amount)}`
             : null;
+      const rawTenantOutletCode = this.readOrdersBookText(row, 'tenant_outlets.tenant_outlet_code');
+      const rawBrandCode = this.readOrdersBookText(row, 'brands.brand_code');
+      const rawBrandName = this.readOrdersBookText(row, 'brands.brand_name') || rawBrandCode;
+      const rawLineId = this.readOrdersBookText(row, 'sales_order_items.external_line_id');
+      const outletName = this.nullableText(this.readOrdersBookText(row, 'outlets.outlet_name'));
+      const externalOutletCode = this.nullableText(this.readOrdersBookText(row, 'outlets.external_outlet_code'));
+      const tenantOutletCode = rawTenantOutletCode || this.deriveTenantOutletCode({
+        externalOutletCode,
+        outletName,
+        distributorCode: distributor_code,
+        beatCode: this.readOrdersBookText(row, 'beats.beat_code'),
+        salesmanCode: this.readOrdersBookText(row, 'salesmen.salesman_code')
+      });
+      const brandCode = rawBrandCode || this.deriveBrandCode({ brandName: this.nullableText(rawBrandName) });
+      const externalLineId =
+        rawLineId ||
+        this.deriveExternalLineId({
+          orderIdentity: this.deriveOrderIdentity(external_invoice_no, external_order_id),
+          skuCode: this.readOrdersBookText(row, 'skus.sku_code'),
+          sourceRowNumber: index + 2
+        });
 
       return {
         source_row_number: index + 2,
@@ -2251,8 +2355,8 @@ export class SupeV1Service {
         salesman_zone,
         salesman_region,
         salesman_area,
-        external_outlet_code: this.nullableText(this.readOrdersBookText(row, 'outlets.external_outlet_code')),
-        outlet_name: this.nullableText(this.readOrdersBookText(row, 'outlets.outlet_name')),
+        external_outlet_code: externalOutletCode,
+        outlet_name: outletName,
         outlet_mobile_number: normalizePhone(this.readOrdersBookText(row, 'outlets.mobile_number')) || null,
         outlet_gst_number: this.nullableText(this.readOrdersBookText(row, 'outlets.gst_number')),
         outlet_address_line1: this.nullableText(this.readOrdersBookText(row, 'outlets.address_line1')),
@@ -2263,9 +2367,9 @@ export class SupeV1Service {
         outlet_zone,
         outlet_region,
         outlet_area,
-        tenant_outlet_code: this.readOrdersBookText(row, 'tenant_outlets.tenant_outlet_code'),
-        brand_code: this.readOrdersBookText(row, 'brands.brand_code'),
-        brand_name: this.readOrdersBookText(row, 'brands.brand_name') || this.readOrdersBookText(row, 'brands.brand_code'),
+        tenant_outlet_code: tenantOutletCode || '',
+        brand_code: brandCode || '',
+        brand_name: rawBrandName,
         sku_code: this.readOrdersBookText(row, 'skus.sku_code'),
         sku_name: this.readOrdersBookText(row, 'skus.name') || this.readOrdersBookText(row, 'skus.sku_code'),
         sku_hsn_code: this.nullableText(this.readOrdersBookText(row, 'skus.hsn_code')),
@@ -2297,7 +2401,7 @@ export class SupeV1Service {
         order_outstanding_amount: this.readOrdersBookNumber(row, 'sales_orders.outstanding_amount'),
         order_decided_margin_amount: this.readOrdersBookNumber(row, 'sales_orders.decided_margin_amount'),
         order_remarks: this.nullableText(this.readOrdersBookText(row, 'sales_orders.remarks')),
-        external_line_id: this.readOrdersBookText(row, 'sales_order_items.external_line_id'),
+        external_line_id: externalLineId || '',
         ordered_quantity: this.readOrdersBookNumber(row, 'sales_order_items.ordered_quantity'),
         line_rate: this.readOrdersBookNumber(row, 'sales_order_items.rate'),
         line_discount_amount: this.readOrdersBookNumber(row, 'sales_order_items.discount_amount'),
@@ -2314,7 +2418,10 @@ export class SupeV1Service {
         payment_mode,
         payment_amount,
         payment_external_ref,
-        payment_identity
+        payment_identity,
+        generated_tenant_outlet_code: !rawTenantOutletCode && Boolean(tenantOutletCode),
+        generated_brand_code: !rawBrandCode && Boolean(brandCode),
+        generated_external_line_id: !rawLineId && Boolean(externalLineId)
       };
     });
   }
@@ -2355,10 +2462,7 @@ export class SupeV1Service {
         { field: 'beat_code', column: 'beats.beat_code' },
         { field: 'salesman_code', column: 'salesmen.salesman_code' },
         { field: 'external_outlet_code', column: 'outlets.external_outlet_code' },
-        { field: 'tenant_outlet_code', column: 'tenant_outlets.tenant_outlet_code' },
-        { field: 'brand_code', column: 'brands.brand_code' },
-        { field: 'sku_code', column: 'skus.sku_code' },
-        { field: 'external_line_id', column: 'sales_order_items.external_line_id' }
+        { field: 'sku_code', column: 'skus.sku_code' }
       ];
 
       for (const { field, column } of requiredTextColumns) {
@@ -2370,6 +2474,28 @@ export class SupeV1Service {
             message: 'is required'
           });
         }
+      }
+
+      if (!row.tenant_outlet_code) {
+        errors.push({
+          sNo,
+          rowNumber,
+          column: 'tenant_outlets.tenant_outlet_code',
+          message: row.outlet_name
+            ? 'could not be derived because outlet identity is incomplete'
+            : 'could not be derived because outlet_name is blank'
+        });
+      }
+
+      if (!row.brand_code) {
+        errors.push({
+          sNo,
+          rowNumber,
+          column: 'brands.brand_code',
+          message: row.brand_name
+            ? 'could not be derived because brand identity is incomplete'
+            : 'could not be derived because brand_name is blank'
+        });
       }
 
       const quantity = row.ordered_quantity;
@@ -2390,6 +2516,15 @@ export class SupeV1Service {
           rowNumber,
           column: 'sales_orders.external_invoice_no|sales_orders.external_order_id',
           message: 'either external_invoice_no or external_order_id is required'
+        });
+      }
+
+      if (!row.external_line_id) {
+        errors.push({
+          sNo,
+          rowNumber,
+          column: 'sales_order_items.external_line_id',
+          message: 'could not be derived because order identity is missing'
         });
       }
 
@@ -4233,6 +4368,7 @@ export class SupeV1Service {
 
     await phase('normalize_rows');
     normalizedRows = this.normalizeOrdersBookRows(parsedRows);
+    const generatedImportSummary = this.buildGeneratedImportSummary(normalizedRows);
 
     await phase('validate_rows');
     const validationErrors = this.validateOrdersBook(headers, normalizedRows);
@@ -4263,9 +4399,14 @@ export class SupeV1Service {
           batchId,
           normalizedRows.length,
           headers.length,
-          publishResult.refreshJobId
-            ? `Import committed; analytics refreshed (#${publishResult.refreshJobId})`
-            : 'Import committed; analytics refreshed'
+          [
+            publishResult.refreshJobId
+              ? `Import committed; analytics refreshed (#${publishResult.refreshJobId})`
+              : 'Import committed; analytics refreshed',
+            generatedImportSummary
+          ]
+            .filter(Boolean)
+            .join(' | ')
         ]
       );
     } catch (error: any) {
