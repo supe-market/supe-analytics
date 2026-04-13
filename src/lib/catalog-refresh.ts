@@ -583,8 +583,18 @@ function buildCatalogRecords(tenant: TenantCatalogTarget, columns: ColumnRow[]) 
     const primaryKeyColumns = tableColumns.filter((column) => column.is_primary_key).map((column) => column.column_name);
     const dateColumns = inferDateColumns(tableColumns, hint);
     const tenantColumn = inferTenantColumn(tableColumns, hint);
-    const metricHints = hint?.metricHints || [];
-    const dimensionHints = hint?.dimensionHints || [];
+    // For manifest tables, use explicit hints. For all others, derive from inferred column roles
+    // so non-manifest tables are still discoverable by business term search.
+    const metricHints = hint?.metricHints?.length
+      ? hint.metricHints
+      : tableColumns
+          .filter((column) => inferSemanticRole(column.column_name, column.data_type) === 'metric')
+          .map((column) => column.column_name.replace(/_/g, ' '));
+    const dimensionHints = hint?.dimensionHints?.length
+      ? hint.dimensionHints
+      : tableColumns
+          .filter((column) => inferSemanticRole(column.column_name, column.data_type) === 'dimension')
+          .map((column) => column.column_name.replace(/_/g, ' '));
     const description = hint?.description || `${titleCase(tableName)} data available for analytics queries.`;
     const displayName = titleCase(tableName);
     const tableAliases = Array.from(new Set([...(hint?.aliases || []), ...defaultTableAliases(tableName), ...metricHints, ...dimensionHints]));
@@ -1200,7 +1210,7 @@ export async function refreshCatalogForTenant(
       throw new Error('semantic pack version missing after catalog refresh');
     }
 
-    const snapshot = buildGraphSnapshot(tenant.id, refreshId, tableRecords, relationshipRecords, aliasRecords);
+    const snapshot = buildGraphSnapshot(tenant.id, refreshId, tableRecords, relationshipRecords, aliasRecords, columnRecords);
     const graphWarmed = await warmGraphCache(tenant.id, refreshId, snapshot);
     if (!graphWarmed) {
       throw new Error('Ask graph cache warm failed');

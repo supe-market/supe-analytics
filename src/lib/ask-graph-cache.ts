@@ -16,6 +16,16 @@ type GraphTableRecord = {
   dimensionHints?: string[];
 };
 
+type GraphColumnRecord = {
+  tableName: string;
+  columnName: string;
+  dataType: string;
+  semanticRole?: string | null;
+  isPrimaryKey?: boolean;
+  referencesTable?: string | null;
+  referencesColumn?: string | null;
+};
+
 type GraphRelationshipRecord = {
   fromTable: string;
   fromColumn: string;
@@ -159,13 +169,31 @@ export function buildGraphCacheKey(tenantId: number, refreshId: string): string 
   return `ask:graph:v1:tenant:${tenantId}:refresh:${refreshId}`;
 }
 
+function buildColumnsIndex(columns: GraphColumnRecord[]): Record<string, Array<Record<string, unknown>>> {
+  const index: Record<string, Array<Record<string, unknown>>> = {};
+  for (const col of columns) {
+    index[col.tableName] ||= [];
+    index[col.tableName].push({
+      columnName: col.columnName,
+      dataType: col.dataType,
+      semanticRole: col.semanticRole || null,
+      isPrimaryKey: col.isPrimaryKey || false,
+      referencesTable: col.referencesTable || null,
+      referencesColumn: col.referencesColumn || null
+    });
+  }
+  return index;
+}
+
 export function buildGraphSnapshot(
   tenantId: number,
   refreshId: string,
   tables: GraphTableRecord[],
   relationships: GraphRelationshipRecord[],
-  aliases: GraphAliasRecord[]
+  aliases: GraphAliasRecord[],
+  columns: GraphColumnRecord[] = []
 ): Record<string, unknown> {
+  const columnsIndex = buildColumnsIndex(columns);
   return {
     refreshId,
     tenantId: String(tenantId),
@@ -180,7 +208,8 @@ export function buildGraphSnapshot(
           primaryKeyColumns: table.primaryKeyColumns || [],
           dateColumns: table.dateColumns || [],
           metricHints: table.metricHints || [],
-          dimensionHints: table.dimensionHints || []
+          dimensionHints: table.dimensionHints || [],
+          columns: columnsIndex[table.tableName] || []
         }
       ])
     ),
