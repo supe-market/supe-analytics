@@ -82,12 +82,17 @@ const SUPPORTED_AGGREGATE_ENTITY_TYPES_BY_TARGET_KEY: Record<string, string[]> =
 
 export const ORDERS_BOOK_HEADERS = [
   'S.no',
+  'distributors.distributor_code',
   'distributors.distributor_name',
   'distributors.zone',
   'distributors.region',
   'distributors.area',
+  'beats.beat_code',
   'beats.beat_name',
+  'salesmen.salesman_code',
   'salesmen.salesman_name',
+  'salesmen.employee_code',
+  'salesmen.external_salesman_id',
   'salesmen.phone_number',
   'salesmen.zone',
   'salesmen.region',
@@ -104,6 +109,8 @@ export const ORDERS_BOOK_HEADERS = [
   'outlets.zone',
   'outlets.region',
   'outlets.area',
+  'tenant_outlets.tenant_outlet_code',
+  'brands.brand_code',
   'brands.brand_name',
   'skus.sku_code',
   'skus.name',
@@ -136,6 +143,7 @@ export const ORDERS_BOOK_HEADERS = [
   'sales_orders.outstanding_amount',
   'sales_orders.decided_margin_amount',
   'sales_orders.remarks',
+  'sales_order_items.external_line_id',
   'sales_order_items.ordered_quantity',
   'sales_order_items.rate',
   'sales_order_items.discount_amount',
@@ -2313,7 +2321,9 @@ export class SupeV1Service {
   private normalizeOrdersBookRows(rows: OrdersBookRow[]): NormalizedOrdersBookRow[] {
     return rows.map((row, index) => {
       const distributor_name_raw = this.readOrdersBookText(row, 'distributors.distributor_name');
-      const distributor_code = this.deriveDistributorCode({ distributorName: distributor_name_raw }) || '';
+      const distributor_code =
+        this.readOrdersBookText(row, 'distributors.distributor_code') ||
+        this.deriveDistributorCode({ distributorName: distributor_name_raw }) || '';
       const distributor_zone = this.nullableText(this.readOrdersBookText(row, 'distributors.zone'));
       const distributor_region = this.nullableText(this.readOrdersBookText(row, 'distributors.region'));
       const distributor_area = this.nullableText(this.readOrdersBookText(row, 'distributors.area'));
@@ -2343,20 +2353,27 @@ export class SupeV1Service {
             ? `${orderIdentity}|DATE:${payment_date || ''}|MODE:${payment_mode || ''}|AMT:${String(payment_amount)}`
             : null;
       const beat_name_raw = this.readOrdersBookText(row, 'beats.beat_name');
-      const beat_code = this.deriveBeatCode({ beatName: beat_name_raw }) || '';
-      const rawBrandCode = '';
+      const beat_code =
+        this.readOrdersBookText(row, 'beats.beat_code') ||
+        this.deriveBeatCode({ beatName: beat_name_raw }) || '';
+      const salesman_name_raw = this.readOrdersBookText(row, 'salesmen.salesman_name');
+      const salesman_code_raw =
+        this.readOrdersBookText(row, 'salesmen.salesman_code') ||
+        this.deriveSalesmanCode({ salesmanName: salesman_name_raw }) || '';
       const rawBrandName = this.readOrdersBookText(row, 'brands.brand_name');
-      const rawLineId = '';
+      const rawBrandCode = this.readOrdersBookText(row, 'brands.brand_code');
       const outletName = this.nullableText(this.readOrdersBookText(row, 'outlets.outlet_name'));
       const externalOutletCode = this.nullableText(this.readOrdersBookText(row, 'outlets.external_outlet_code'));
-      const tenantOutletCode = this.deriveTenantOutletCode({
+      const rawTenantOutletCode = this.nullableText(this.readOrdersBookText(row, 'tenant_outlets.tenant_outlet_code'));
+      const tenantOutletCode = rawTenantOutletCode || this.deriveTenantOutletCode({
         externalOutletCode,
         outletName,
         distributorCode: distributor_code,
         beatCode: beat_code,
-        salesmanCode: this.readOrdersBookText(row, 'salesmen.salesman_name')
+        salesmanCode: salesman_name_raw
       });
       const brandCode = rawBrandCode || this.deriveBrandCode({ brandName: this.nullableText(rawBrandName) });
+      const rawLineId = this.nullableText(this.readOrdersBookText(row, 'sales_order_items.external_line_id'));
       const externalLineId =
         rawLineId ||
         this.deriveExternalLineId({
@@ -2375,10 +2392,10 @@ export class SupeV1Service {
         distributor_area,
         beat_code,
         beat_name: beat_name_raw,
-        salesman_name: this.readOrdersBookText(row, 'salesmen.salesman_name'),
-        salesman_code: this.deriveSalesmanCode({ salesmanName: this.readOrdersBookText(row, 'salesmen.salesman_name') }) || '',
-        salesman_employee_code: null,
-        salesman_external_salesman_id: null,
+        salesman_name: salesman_name_raw,
+        salesman_code: salesman_code_raw,
+        salesman_employee_code: this.nullableText(this.readOrdersBookText(row, 'salesmen.employee_code')),
+        salesman_external_salesman_id: this.nullableText(this.readOrdersBookText(row, 'salesmen.external_salesman_id')),
         salesman_phone_number: normalizePhone(this.readOrdersBookText(row, 'salesmen.phone_number')) || null,
         salesman_zone,
         salesman_region,
@@ -2447,7 +2464,7 @@ export class SupeV1Service {
         payment_amount,
         payment_external_ref,
         payment_identity,
-        generated_tenant_outlet_code: Boolean(tenantOutletCode),
+        generated_tenant_outlet_code: !rawTenantOutletCode && Boolean(tenantOutletCode),
         generated_brand_code: !rawBrandCode && Boolean(brandCode),
         generated_external_line_id: !rawLineId && Boolean(externalLineId)
       };
@@ -2481,27 +2498,32 @@ export class SupeV1Service {
     }
 
     const seenLineKeys = new Set<string>();
+    const seenOrderOutletKeys = new Set<string>();
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
       const rowNumber = row.source_row_number;
       const sNo = row.s_no || String(index + 1);
-      const requiredTextColumns: Array<{ field: keyof NormalizedOrdersBookRow; column: string }> = [
-        { field: 'distributor_code', column: 'distributors.distributor_code' },
-        { field: 'beat_code', column: 'beats.beat_code' },
-        { field: 'salesman_code', column: 'salesmen.salesman_code' },
-        { field: 'external_outlet_code', column: 'outlets.external_outlet_code' },
-        { field: 'sku_code', column: 'skus.sku_code' }
-      ];
 
-      for (const { field, column } of requiredTextColumns) {
-        if (!String((row as Record<string, unknown>)[field] || '').trim()) {
-          errors.push({
-            sNo,
-            rowNumber,
-            column,
-            message: 'is required'
-          });
-        }
+      // sku_code — hard required, no fallback exists
+      if (!String(row.sku_code || '').trim()) {
+        errors.push({ sNo, rowNumber, column: 'skus.sku_code', message: 'is required' });
+      }
+
+      // Entity identity checks — error only when BOTH code AND name are blank,
+      // meaning we have no basis to identify the entity at all.
+      // When only the code is blank we derive one from the name (see ORDERS_BOOK_GUIDE.md),
+      // but the uploader should be warned via the import summary that derivation was used.
+      if (!row.distributor_code && !row.distributor_name) {
+        errors.push({ sNo, rowNumber, column: 'distributors.distributor_code', message: 'distributor_code and distributor_name are both blank — cannot identify distributor' });
+      }
+      if (!row.beat_code && !row.beat_name) {
+        errors.push({ sNo, rowNumber, column: 'beats.beat_code', message: 'beat_code and beat_name are both blank — cannot identify beat' });
+      }
+      if (!row.salesman_code && !row.salesman_name) {
+        errors.push({ sNo, rowNumber, column: 'salesmen.salesman_code', message: 'salesman_code and salesman_name are both blank — cannot identify salesman' });
+      }
+      if (!row.brand_code && !row.brand_name) {
+        errors.push({ sNo, rowNumber, column: 'brands.brand_code', message: 'brand_code and brand_name are both blank — cannot identify brand' });
       }
 
       if (!row.tenant_outlet_code) {
@@ -2512,17 +2534,6 @@ export class SupeV1Service {
           message: row.outlet_name
             ? 'could not be derived because outlet identity is incomplete'
             : 'could not be derived because outlet_name is blank'
-        });
-      }
-
-      if (!row.brand_code) {
-        errors.push({
-          sNo,
-          rowNumber,
-          column: 'brands.brand_code',
-          message: row.brand_name
-            ? 'could not be derived because brand identity is incomplete'
-            : 'could not be derived because brand_name is blank'
         });
       }
 
@@ -2569,6 +2580,22 @@ export class SupeV1Service {
           });
         } else {
           seenLineKeys.add(lineKey);
+        }
+
+        // Duplicate SKU on the same order — same order+SKU appearing more than once is
+        // almost always a data error (copied row) rather than intentional split quantity.
+        if (row.sku_code) {
+          const orderSkuKey = `${orderIdentity}|SKU:${row.sku_code}`;
+          if (seenOrderOutletKeys.has(orderSkuKey)) {
+            errors.push({
+              sNo,
+              rowNumber,
+              column: 'skus.sku_code',
+              message: `SKU "${row.sku_code}" appears more than once on order ${orderIdentity} — merge into a single line or provide distinct external_line_id values`
+            });
+          } else {
+            seenOrderOutletKeys.add(orderSkuKey);
+          }
         }
       }
     }
@@ -3039,6 +3066,7 @@ export class SupeV1Service {
           s.distributor_region,
           s.distributor_area
         from ${stageTable} s
+        where s.beat_code is not null and s.beat_code <> ''
         order by s.beat_code, s.source_row_number desc
       )
       insert into beats (tenant_id, beat_code, beat_name, distributor_id, zone, region, area, active)
@@ -3334,6 +3362,7 @@ export class SupeV1Service {
           s.tenant_outlet_code,
           s.beat_code
         from ${stageTable} s
+        where s.beat_code is not null and s.beat_code <> ''
         order by s.tenant_outlet_code, s.source_row_number desc
       ),
       resolved as (
@@ -3366,6 +3395,7 @@ export class SupeV1Service {
           s.beat_code,
           s.order_punched_at
         from ${stageTable} s
+        where s.beat_code is not null and s.beat_code <> ''
         order by s.tenant_outlet_code, s.source_row_number desc
       ),
       resolved as (
@@ -3598,9 +3628,9 @@ export class SupeV1Service {
         from latest
         join tenant_outlets to2 on to2.tenant_id = $1 and to2.tenant_outlet_code = latest.tenant_outlet_code
         join outlets o on o.id = to2.outlet_id
-        join beats b on b.tenant_id = $1 and b.beat_code = latest.beat_code
-        join salesmen sm on sm.tenant_id = $1 and sm.salesman_code = latest.salesman_code
-        join distributors d on d.tenant_id = $1 and d.distributor_code = latest.distributor_code
+        left join beats b on b.tenant_id = $1 and b.beat_code = latest.beat_code and latest.beat_code <> ''
+        left join salesmen sm on sm.tenant_id = $1 and sm.salesman_code = latest.salesman_code and latest.salesman_code <> ''
+        left join distributors d on d.tenant_id = $1 and d.distributor_code = latest.distributor_code and latest.distributor_code <> ''
       ),
       updated as (
         update sales_orders so
