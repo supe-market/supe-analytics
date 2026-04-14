@@ -82,14 +82,11 @@ const SUPPORTED_AGGREGATE_ENTITY_TYPES_BY_TARGET_KEY: Record<string, string[]> =
 
 export const ORDERS_BOOK_HEADERS = [
   'S.no',
-  'distributors.distributor_code',
   'distributors.distributor_name',
   'distributors.zone',
   'distributors.region',
   'distributors.area',
-  'beats.beat_code',
   'beats.beat_name',
-  'salesmen.salesman_code',
   'salesmen.salesman_name',
   'salesmen.phone_number',
   'salesmen.zone',
@@ -2239,6 +2236,33 @@ export class SupeV1Service {
     return `TOUT_${base}_${hash}`;
   }
 
+  private deriveDistributorCode(input: { distributorName: string | null }): string | null {
+    if (!input.distributorName) {
+      return null;
+    }
+    const base = normalizeCodeFragment(input.distributorName) || 'DIST';
+    const hash = shortStableHash(['distributor', input.distributorName].join('|'));
+    return `DIST_${base}_${hash}`;
+  }
+
+  private deriveBeatCode(input: { beatName: string | null }): string | null {
+    if (!input.beatName) {
+      return null;
+    }
+    const base = normalizeCodeFragment(input.beatName) || 'BEAT';
+    const hash = shortStableHash(['beat', input.beatName].join('|'));
+    return `BEAT_${base}_${hash}`;
+  }
+
+  private deriveSalesmanCode(input: { salesmanName: string | null }): string | null {
+    if (!input.salesmanName) {
+      return null;
+    }
+    const base = normalizeCodeFragment(input.salesmanName) || 'SM';
+    const hash = shortStableHash(['salesman', input.salesmanName].join('|'));
+    return `SM_${base}_${hash}`;
+  }
+
   private deriveBrandCode(input: { brandName: string | null }): string | null {
     if (!input.brandName) {
       return null;
@@ -2288,7 +2312,8 @@ export class SupeV1Service {
 
   private normalizeOrdersBookRows(rows: OrdersBookRow[]): NormalizedOrdersBookRow[] {
     return rows.map((row, index) => {
-      const distributor_code = this.readOrdersBookText(row, 'distributors.distributor_code');
+      const distributor_name_raw = this.readOrdersBookText(row, 'distributors.distributor_name');
+      const distributor_code = this.deriveDistributorCode({ distributorName: distributor_name_raw }) || '';
       const distributor_zone = this.nullableText(this.readOrdersBookText(row, 'distributors.zone'));
       const distributor_region = this.nullableText(this.readOrdersBookText(row, 'distributors.region'));
       const distributor_area = this.nullableText(this.readOrdersBookText(row, 'distributors.area'));
@@ -2317,18 +2342,19 @@ export class SupeV1Service {
           : payment_amount !== null && payment_amount > 0
             ? `${orderIdentity}|DATE:${payment_date || ''}|MODE:${payment_mode || ''}|AMT:${String(payment_amount)}`
             : null;
-      const rawTenantOutletCode = '';
+      const beat_name_raw = this.readOrdersBookText(row, 'beats.beat_name');
+      const beat_code = this.deriveBeatCode({ beatName: beat_name_raw }) || '';
       const rawBrandCode = '';
       const rawBrandName = this.readOrdersBookText(row, 'brands.brand_name');
       const rawLineId = '';
       const outletName = this.nullableText(this.readOrdersBookText(row, 'outlets.outlet_name'));
       const externalOutletCode = this.nullableText(this.readOrdersBookText(row, 'outlets.external_outlet_code'));
-      const tenantOutletCode = rawTenantOutletCode || this.deriveTenantOutletCode({
+      const tenantOutletCode = this.deriveTenantOutletCode({
         externalOutletCode,
         outletName,
         distributorCode: distributor_code,
-        beatCode: this.readOrdersBookText(row, 'beats.beat_code'),
-        salesmanCode: this.readOrdersBookText(row, 'salesmen.salesman_code')
+        beatCode: beat_code,
+        salesmanCode: this.readOrdersBookText(row, 'salesmen.salesman_name')
       });
       const brandCode = rawBrandCode || this.deriveBrandCode({ brandName: this.nullableText(rawBrandName) });
       const externalLineId =
@@ -2343,15 +2369,14 @@ export class SupeV1Service {
         source_row_number: index + 2,
         s_no: this.readOrdersBookText(row, 'S.no') || String(index + 1),
         distributor_code,
-        distributor_name: this.readOrdersBookText(row, 'distributors.distributor_name') || distributor_code,
+        distributor_name: distributor_name_raw,
         distributor_zone,
         distributor_region,
         distributor_area,
-        beat_code: this.readOrdersBookText(row, 'beats.beat_code'),
-        beat_name: this.readOrdersBookText(row, 'beats.beat_name') || this.readOrdersBookText(row, 'beats.beat_code'),
-        salesman_code: this.readOrdersBookText(row, 'salesmen.salesman_code'),
-        salesman_name:
-          this.readOrdersBookText(row, 'salesmen.salesman_name') || this.readOrdersBookText(row, 'salesmen.salesman_code'),
+        beat_code,
+        beat_name: beat_name_raw,
+        salesman_name: this.readOrdersBookText(row, 'salesmen.salesman_name'),
+        salesman_code: this.deriveSalesmanCode({ salesmanName: this.readOrdersBookText(row, 'salesmen.salesman_name') }) || '',
         salesman_employee_code: null,
         salesman_external_salesman_id: null,
         salesman_phone_number: normalizePhone(this.readOrdersBookText(row, 'salesmen.phone_number')) || null,
@@ -2422,7 +2447,7 @@ export class SupeV1Service {
         payment_amount,
         payment_external_ref,
         payment_identity,
-        generated_tenant_outlet_code: !rawTenantOutletCode && Boolean(tenantOutletCode),
+        generated_tenant_outlet_code: Boolean(tenantOutletCode),
         generated_brand_code: !rawBrandCode && Boolean(brandCode),
         generated_external_line_id: !rawLineId && Boolean(externalLineId)
       };
@@ -5669,6 +5694,7 @@ export class SupeV1Service {
         select
           s.id::text as salesman_id,
           s.salesman_name,
+          s.salesman_code,
           coalesce(s.zone, d.zone, '-') as zone,
           coalesce(s.region, d.region, '-') as region,
           coalesce(s.area, d.area, '-') as area,
@@ -5703,6 +5729,7 @@ export class SupeV1Service {
       mapped = rows.map((row: any) => ({
         id: String(row.salesman_id),
         name: row.salesman_name,
+        code: row.salesman_code || '',
         salesmanId: String(row.salesman_id),
         zone: row.zone,
         region: row.region,
@@ -5873,6 +5900,7 @@ export class SupeV1Service {
         select
           b.id::text as beat_id,
           b.beat_name,
+          b.beat_code,
           coalesce(b.zone, d.zone, '-') as zone,
           coalesce(b.region, d.region, '-') as region,
           coalesce(b.area, d.area, '-') as area,
@@ -5900,6 +5928,7 @@ export class SupeV1Service {
       mapped = rows.map((row: any) => ({
         id: String(row.beat_id),
         name: row.beat_name,
+        code: row.beat_code || '',
         beatId: String(row.beat_id),
         beatName: row.beat_name,
         zone: row.zone,
@@ -6003,6 +6032,7 @@ export class SupeV1Service {
         select
           d.id::text as distributor_id,
           d.distributor_name,
+          d.distributor_code,
           coalesce(d.zone, '-') as zone,
           coalesce(d.region, '-') as region,
           coalesce(d.area, '-') as area,
@@ -6026,6 +6056,7 @@ export class SupeV1Service {
       mapped = rows.map((row: any) => ({
         id: String(row.distributor_id),
         name: row.distributor_name,
+        code: row.distributor_code || '',
         distributorId: String(row.distributor_id),
         distributorName: row.distributor_name,
         zone: row.zone,
