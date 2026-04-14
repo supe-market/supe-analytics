@@ -3270,7 +3270,7 @@ export class SupeV1Service {
       with latest as (
         select distinct on (s.tenant_outlet_code)
           s.tenant_outlet_code,
-          s.salesman_code,
+          s.salesman_employee_code,
           s.distributor_code,
           s.order_sale_date
         from ${stageTable} s
