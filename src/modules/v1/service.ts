@@ -91,8 +91,6 @@ export const ORDERS_BOOK_HEADERS = [
   'beats.beat_name',
   'salesmen.salesman_code',
   'salesmen.salesman_name',
-  'salesmen.employee_code',
-  'salesmen.external_salesman_id',
   'salesmen.phone_number',
   'salesmen.zone',
   'salesmen.region',
@@ -109,8 +107,6 @@ export const ORDERS_BOOK_HEADERS = [
   'outlets.zone',
   'outlets.region',
   'outlets.area',
-  'tenant_outlets.tenant_outlet_code',
-  'brands.brand_code',
   'brands.brand_name',
   'skus.sku_code',
   'skus.name',
@@ -143,7 +139,6 @@ export const ORDERS_BOOK_HEADERS = [
   'sales_orders.outstanding_amount',
   'sales_orders.decided_margin_amount',
   'sales_orders.remarks',
-  'sales_order_items.external_line_id',
   'sales_order_items.ordered_quantity',
   'sales_order_items.rate',
   'sales_order_items.discount_amount',
@@ -2322,10 +2317,10 @@ export class SupeV1Service {
           : payment_amount !== null && payment_amount > 0
             ? `${orderIdentity}|DATE:${payment_date || ''}|MODE:${payment_mode || ''}|AMT:${String(payment_amount)}`
             : null;
-      const rawTenantOutletCode = this.readOrdersBookText(row, 'tenant_outlets.tenant_outlet_code');
-      const rawBrandCode = this.readOrdersBookText(row, 'brands.brand_code');
-      const rawBrandName = this.readOrdersBookText(row, 'brands.brand_name') || rawBrandCode;
-      const rawLineId = this.readOrdersBookText(row, 'sales_order_items.external_line_id');
+      const rawTenantOutletCode = '';
+      const rawBrandCode = '';
+      const rawBrandName = this.readOrdersBookText(row, 'brands.brand_name');
+      const rawLineId = '';
       const outletName = this.nullableText(this.readOrdersBookText(row, 'outlets.outlet_name'));
       const externalOutletCode = this.nullableText(this.readOrdersBookText(row, 'outlets.external_outlet_code'));
       const tenantOutletCode = rawTenantOutletCode || this.deriveTenantOutletCode({
@@ -2357,8 +2352,8 @@ export class SupeV1Service {
         salesman_code: this.readOrdersBookText(row, 'salesmen.salesman_code'),
         salesman_name:
           this.readOrdersBookText(row, 'salesmen.salesman_name') || this.readOrdersBookText(row, 'salesmen.salesman_code'),
-        salesman_employee_code: this.nullableText(this.readOrdersBookText(row, 'salesmen.employee_code')),
-        salesman_external_salesman_id: this.nullableText(this.readOrdersBookText(row, 'salesmen.external_salesman_id')),
+        salesman_employee_code: null,
+        salesman_external_salesman_id: null,
         salesman_phone_number: normalizePhone(this.readOrdersBookText(row, 'salesmen.phone_number')) || null,
         salesman_zone,
         salesman_region,
