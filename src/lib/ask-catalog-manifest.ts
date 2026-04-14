@@ -117,7 +117,9 @@ export const ASK_CATALOG_MANIFEST: Record<string, CatalogTableHint> = {
     dimensionHints: ['salesman', 'region', 'area', 'distributor'],
     tenantColumn: 'tenant_id',
     columns: {
+      employee_code: { aliases: ['employee code', 'emp code', 'salesman id'], semanticRole: 'identifier', description: 'Unique lookup key for a salesman. Use this column to filter by salesman when the user provides a code. Note: salesman_code is informational only and not unique.' },
       salesman_name: { aliases: ['salesman', 'rep name'], semanticRole: 'dimension' },
+      salesman_code: { aliases: ['salesman code'], semanticRole: 'dimension', description: 'Informational only — not unique. Use employee_code for filtering.' },
       distributor_id: { aliases: ['assigned distributor'], semanticRole: 'identifier' }
     }
   },
@@ -127,6 +129,7 @@ export const ASK_CATALOG_MANIFEST: Record<string, CatalogTableHint> = {
     dimensionHints: ['distributor', 'zone', 'region', 'area'],
     tenantColumn: 'tenant_id',
     columns: {
+      distributor_code: { aliases: ['distributor code', 'dist code'], semanticRole: 'identifier', description: 'Unique lookup key for a distributor.' },
       distributor_name: { aliases: ['distributor'], semanticRole: 'dimension' }
     }
   },
@@ -136,6 +139,7 @@ export const ASK_CATALOG_MANIFEST: Record<string, CatalogTableHint> = {
     dimensionHints: ['beat', 'route', 'sales route'],
     tenantColumn: 'tenant_id',
     columns: {
+      beat_code: { aliases: ['beat code', 'route code'], semanticRole: 'identifier', description: 'Unique lookup key for a beat/route.' },
       beat_name: { aliases: ['beat', 'route'], semanticRole: 'dimension' }
     }
   },
@@ -146,7 +150,7 @@ export const ASK_CATALOG_MANIFEST: Record<string, CatalogTableHint> = {
     tenantColumn: 'tenant_id',
     canonicalDateColumns: ['first_order_date', 'last_order_date'],
     columns: {
-      tenant_outlet_code: { aliases: ['retailer code', 'outlet code'], semanticRole: 'dimension' },
+      tenant_outlet_code: { aliases: ['retailer code', 'outlet code'], semanticRole: 'identifier', description: 'Unique lookup key for an outlet/retailer.' },
       servicing_status: { aliases: ['status', 'servicing status'], semanticRole: 'dimension' },
       first_order_date: { aliases: ['first order date'], semanticRole: 'date' },
       last_order_date: { aliases: ['last order date'], semanticRole: 'date' }
@@ -159,6 +163,7 @@ export const ASK_CATALOG_MANIFEST: Record<string, CatalogTableHint> = {
     dimensionHints: ['product', 'brand', 'hsn'],
     tenantColumn: 'tenant_id',
     columns: {
+      sku_code: { aliases: ['sku code', 'product code', 'item code'], semanticRole: 'identifier', description: 'Unique lookup key for a SKU.' },
       name: { aliases: ['sku name', 'product name'], semanticRole: 'dimension' },
       mrp: { aliases: ['mrp'], semanticRole: 'metric' },
       rate: { aliases: ['rate', 'price'], semanticRole: 'metric' }
