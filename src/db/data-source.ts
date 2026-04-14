@@ -5,6 +5,8 @@ import { InitSupeSchema1710000000000 } from './migrations/1710000000000-InitSupe
 import { ActionWorkflow1710000001000 } from './migrations/1710000001000-ActionWorkflow';
 import { AsyncImportPipeline1710000002000 } from './migrations/1710000002000-AsyncImportPipeline';
 import { TenantRefreshJobs1710000003000 } from './migrations/1710000003000-TenantRefreshJobs';
+import { ImportPerfIndexes1710000004000 } from './migrations/1710000004000-ImportPerfIndexes';
+import { SalesmanEmployeeCodeIdentity1710000005000 } from './migrations/1710000005000-SalesmanEmployeeCodeIdentity';
 
 
 const AppDataSource = new DataSource({
@@ -21,7 +23,9 @@ const AppDataSource = new DataSource({
     InitSupeSchema1710000000000,
     ActionWorkflow1710000001000,
     AsyncImportPipeline1710000002000,
-    TenantRefreshJobs1710000003000
+    TenantRefreshJobs1710000003000,
+    ImportPerfIndexes1710000004000,
+    SalesmanEmployeeCodeIdentity1710000005000
   ],
   synchronize: false,
   logging: false
