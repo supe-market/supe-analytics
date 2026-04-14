@@ -5792,6 +5792,7 @@ export class SupeV1Service {
         )
         select
           o.id::text as retailer_id,
+          to2.tenant_outlet_code,
           o.outlet_name as retailer_name,
           coalesce(o.zone, d.zone, '-') as zone,
           coalesce(o.region, d.region, '-') as region,
@@ -5832,6 +5833,7 @@ export class SupeV1Service {
         return {
           id: String(row.retailer_id),
           name: row.retailer_name,
+          code: row.tenant_outlet_code || '',
           retailerId: String(row.retailer_id),
           zone: row.zone,
           region: row.region,
@@ -5961,6 +5963,7 @@ export class SupeV1Service {
         )
         select
           s.id::text as sku_id,
+          s.sku_code,
           s.name as sku_name,
           coalesce(b.brand_name, '-') as brand_name,
           coalesce(max(ems.zone), '-') as zone,
@@ -5989,6 +5992,7 @@ export class SupeV1Service {
       mapped = rows.map((row: any) => ({
         id: String(row.sku_id),
         name: row.sku_name,
+        code: row.sku_code || '',
         skuId: String(row.sku_id),
         skuName: row.sku_name,
         brand: row.brand_name || '-',
